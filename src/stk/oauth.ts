@@ -22,11 +22,10 @@ export async function generatePkce(): Promise<PkcePair> {
 	return { verifier, challenge };
 }
 
-export async function runOAuthFlow(
+export async function runOAuthFlowWithPkce(
+	pkce: PkcePair,
 	authUrlBuilder: (pkce: PkcePair, redirectUri: string) => string,
 ): Promise<OAuthResult> {
-	const pkce = await generatePkce();
-
 	return new Promise<OAuthResult>((resolve, reject) => {
 		let settled = false;
 		let port = 0;
@@ -105,4 +104,11 @@ export async function runOAuthFlow(
 			rejectOnce(new Error('OAuth flow timed out after 5 minutes'));
 		}, 5 * 60 * 1000);
 	});
+}
+
+export async function runOAuthFlow(
+	authUrlBuilder: (pkce: PkcePair, redirectUri: string) => string,
+): Promise<OAuthResult> {
+	const pkce = await generatePkce();
+	return runOAuthFlowWithPkce(pkce, authUrlBuilder);
 }

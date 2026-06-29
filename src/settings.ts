@@ -36,7 +36,7 @@ export class KindleStkSettingTab extends PluginSettingTab {
 				btn.setButtonText(
 					this.plugin.isAuthenticated() ? 'Re-authenticate' : 'Authenticate',
 				);
-				btn.onClick(() => this.plugin.startOAuthFlow());
+				btn.onClick(() => void this.plugin.startOAuthFlow().then(() => this.redraw()));
 			});
 
 		new Setting(containerEl)
@@ -51,5 +51,11 @@ export class KindleStkSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
+	}
+
+	private redraw(): void {
+		this.containerEl.empty();
+		// eslint-disable-next-line @typescript-eslint/no-deprecated -- minAppVersion 1.11.4 predates getSettingDefinitions
+		this.display();
 	}
 }

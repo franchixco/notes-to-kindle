@@ -3,40 +3,58 @@
 ## Project overview
 
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
+- What it does: sends Obsidian notes to Kindle as EPUB via Amazon's Send to Kindle API. 100% local, no server, no SMTP.
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
 - Required release artifacts: `main.js`, `manifest.json`, and optional `styles.css`.
+- `isDesktopOnly: true` — requires Node APIs (`crypto`, `http`) not available on Obsidian mobile.
+
+## Architecture
+
+```
+src/
+  main.ts                     Plugin entry: lifecycle, commands, glue
+  settings.ts                 Settings tab + interface
+  stk/
+    client.ts                 Amazon STK API client (registerDevice, listOwnedDevices, sendToKindle)
+    signer.ts                 RSA PKCS#1 v1.5 request signing (Node crypto)
+    oauth.ts                  OAuth2 PKCE flow (local http server + window.open)
+  obsidian-extract/
+    extract.ts                Resolves embeds, wikilinks, callouts → clean markdown
+  epub/
+    builder.ts                Markdown → EPUB (in-memory ArrayBuffer)
+```
+
+Credentials (RSA private key, Amazon tokens) are stored via `app.secretStorage` (OS keychain, requires API 1.11.4+). Non-sensitive settings via `loadData()`/`saveData()` as usual.
 
 ## Environment & tooling
 
 - Node.js: use current LTS (Node 18+ recommended).
-- **Package manager: npm** (required for this sample - `package.json` defines npm scripts and dependencies).
-- **Bundler: esbuild** (required for this sample - `esbuild.config.mjs` and build scripts depend on it). Alternative bundlers like Rollup or webpack are acceptable for other projects if they bundle all external dependencies into `main.js`.
+- **Package manager: bun** (global rule). Use `bun install`, `bun run <script>`.
+- **Bundler: esbuild** (configured in `esbuild.config.mjs`).
 - Types: `obsidian` type definitions.
-
-**Note**: This sample project has specific technical dependencies on npm and esbuild. If you're creating a plugin from scratch, you can choose different tools, but you'll need to replace the build configuration accordingly.
 
 ### Install
 
 ```bash
-npm install
+bun install
 ```
 
 ### Dev (watch)
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 ### Production build
 
 ```bash
-npm run build
+bun run build
 ```
 
 ## Linting
 
 - ESLint is preconfigured with `eslint-plugin-obsidianmd` for Obsidian-specific rules.
-- Run `npm run lint` to lint the project.
+- Run `bun run lint` to lint the project.
 - A GitHub Action automatically lints every commit on all branches.
 
 ## File & folder conventions
@@ -267,3 +285,5 @@ this.registerInterval(
 - Developer policies: https://docs.obsidian.md/Developer+policies
 - Plugin guidelines: https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
 - Style guide: https://help.obsidian.md/style-guide
+- stkclient (Python reference impl we're porting): https://github.com/maxdjohnson/stkclient
+- Amazon STK endpoints: `stkservice.amazon.com`, `firs-ta-g7g.amazon.com`, `api.amazon.com`

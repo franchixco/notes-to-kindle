@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "1.0.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+	"id": "obsidian-kindle-stk",
+	"name": "Send to Kindle (local)",
+	"version": "0.0.1",
+	"minAppVersion": "1.11.4",
+	"description": "Send your Obsidian notes to your Kindle as EPUB. 100% local — no server, no SMTP. Uses Amazon's Send to Kindle API directly.",
+	"author": "franchixco",
+	"authorUrl": "https://github.com/franchixco",
+	"isDesktopOnly": true
 }

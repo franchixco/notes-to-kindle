@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-kindle-stk",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"description": "Send Obsidian notes to Kindle via Amazon Send to Kindle API. 100% local, no server.",
 	"main": "main.js",
 	"type": "module",

@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-kindle-stk",
 	"name": "Send to Kindle (local)",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"minAppVersion": "1.11.4",
 	"description": "Send your Obsidian notes to your Kindle as EPUB. 100% local — no server, no SMTP. Uses Amazon's Send to Kindle API directly.",
 	"author": "franchixco",

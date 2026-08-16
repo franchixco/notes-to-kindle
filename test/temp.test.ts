@@ -29,7 +29,7 @@ describe('createTempEpubFile', () => {
 			const dir = temp.path.slice(0, temp.path.lastIndexOf('/'));
 			const parent = dir.slice(0, dir.lastIndexOf('/'));
 			expect(parent).toBe(tmpdir());
-			expect(dir.startsWith(join(tmpdir(), 'send-to-kindle-'))).toBe(true);
+			expect(dir.startsWith(join(tmpdir(), 'notes-to-kindle-'))).toBe(true);
 			expect(modeOf(dir)).toBe(MODE_0700);
 		} finally {
 			temp.cleanup();

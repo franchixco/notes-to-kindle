@@ -2,12 +2,32 @@
  * Validation for the presigned upload URL returned by `/GetUploadUrl`.
  *
  * The URL comes from Amazon's API but is signed S3 data, so it is still
- * treated as untrusted input: only HTTPS, only exact/subdomain Amazon hosts,
- * no userinfo, no non-default port, no IP literals, no protocol-relative
- * URLs. The query string (signature parameters) is preserved.
+ * treated as untrusted input: only HTTPS, only exact AWS S3 endpoint host
+ * shapes, no userinfo, no non-default port, no IP literals, no
+ * protocol-relative URLs. The query string (signature parameters) is
+ * preserved.
  */
 
-const ALLOWED_UPLOAD_ROOT_DOMAINS = ['amazon.com', 'amazonaws.com'];
+const REGION_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
+const BUCKET_LABEL = '[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?';
+
+// Exact S3 endpoint host forms (lowercased, full-string match):
+//   s3.amazonaws.com
+//   s3.<region>.amazonaws.com
+//   s3.dualstack.<region>.amazonaws.com
+//   <bucket>.s3.amazonaws.com
+//   <bucket>.s3.<region>.amazonaws.com
+//   <bucket>.s3.dualstack.<region>.amazonaws.com
+//   <bucket>.s3-<region>.amazonaws.com (legacy)
+const S3_HOST_PATTERNS = [
+	new RegExp(`^s3\\.amazonaws\\.com$`),
+	new RegExp(`^s3\\.${REGION_LABEL}\\.amazonaws\\.com$`),
+	new RegExp(`^s3\\.dualstack\\.${REGION_LABEL}\\.amazonaws\\.com$`),
+	new RegExp(`^${BUCKET_LABEL}\\.s3\\.amazonaws\\.com$`),
+	new RegExp(`^${BUCKET_LABEL}\\.s3\\.${REGION_LABEL}\\.amazonaws\\.com$`),
+	new RegExp(`^${BUCKET_LABEL}\\.s3\\.dualstack\\.${REGION_LABEL}\\.amazonaws\\.com$`),
+	new RegExp(`^${BUCKET_LABEL}\\.s3-${REGION_LABEL}\\.amazonaws\\.com$`),
+];
 
 const IPV4_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
 const IPV4_LITERAL_RE = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
@@ -16,11 +36,9 @@ function isIpLiteral(hostname: string): boolean {
 	return IPV4_LITERAL_RE.test(hostname) || hostname.startsWith('[');
 }
 
-function isAllowedUploadHost(hostname: string): boolean {
+function isS3EndpointHost(hostname: string): boolean {
 	const host = hostname.toLowerCase();
-	return ALLOWED_UPLOAD_ROOT_DOMAINS.some(
-		(domain) => host === domain || host.endsWith(`.${domain}`),
-	);
+	return S3_HOST_PATTERNS.some((pattern) => pattern.test(host));
 }
 
 export function validateUploadUrl(rawUrl: string): URL {
@@ -51,8 +69,8 @@ export function validateUploadUrl(rawUrl: string): URL {
 	if (isIpLiteral(url.hostname)) {
 		throw new Error('Upload URL must use a hostname, not an IP address');
 	}
-	if (!isAllowedUploadHost(url.hostname)) {
-		throw new Error(`Upload URL host "${url.hostname}" is not an allowed Amazon host`);
+	if (!isS3EndpointHost(url.hostname)) {
+		throw new Error(`Upload URL host "${url.hostname}" is not an allowed S3 endpoint`);
 	}
 
 	return url;

@@ -2,21 +2,53 @@ import { describe, expect, it } from 'bun:test';
 import { validateUploadUrl } from '../src/stk/upload';
 
 describe('validateUploadUrl', () => {
-	it('accepts exact Amazon hosts', () => {
-		expect(validateUploadUrl('https://amazon.com/x.epub').hostname).toBe('amazon.com');
-		expect(validateUploadUrl('https://amazonaws.com/x.epub').hostname).toBe('amazonaws.com');
-	});
-
-	it('accepts deep Amazon subdomains', () => {
+	it('accepts exact S3 endpoint shapes', () => {
 		for (const url of [
 			'https://s3.amazonaws.com/bucket/note.epub',
+			'https://s3.us-east-1.amazonaws.com/bucket/note.epub',
+			'https://s3.dualstack.us-east-1.amazonaws.com/bucket/note.epub',
 			'https://bucket.s3.amazonaws.com/note.epub',
+			'https://bucket.s3.us-west-2.amazonaws.com/note.epub',
+			'https://bucket.s3.dualstack.us-west-2.amazonaws.com/note.epub',
+			'https://bucket.s3-us-west-2.amazonaws.com/note.epub',
+			'https://my.bucket.s3.amazonaws.com/note.epub',
+		]) {
+			expect(() => validateUploadUrl(url), url).not.toThrow();
+		}
+	});
+
+	it('rejects bare Amazon roots and non-S3 Amazon subdomains', () => {
+		for (const url of [
+			'https://amazon.com/x.epub',
+			'https://amazonaws.com/x.epub',
+			'https://www.amazon.com/x',
 			'https://stkservice.amazon.com/some/path',
 			'https://firs-ta-g7g.amazon.com/x',
 			'https://deep.sub.amazonaws.com/x',
 			'https://upload.amazon.com/x',
+			'https://s3.foo.bar.amazonaws.com/x',
 		]) {
-			expect(() => validateUploadUrl(url), url).not.toThrow();
+			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed S3 endpoint/);
+		}
+	});
+
+	it('rejects deceptive suffixes, unrelated hosts and third-party bucket hosts', () => {
+		for (const url of [
+			'https://amazon.com.evil.com/x',
+			'https://amazonaws.com.evil.com/x',
+			'https://evilamazonaws.com/x',
+			'https://amazon.com.co/x',
+			'https://www.amazon.co.uk/x',
+			'https://evil.com/x',
+			'https://cloudfront.net/x',
+			'https://amazon.com.attacker.io/x',
+			'https://s3.amazonaws.com.evil.com/x',
+			'https://bucket.s3.example.com/x',
+			'https://bucket.storage.example.com/x',
+			'https://s3.notamazon.com/x',
+			'https://my-bucket.s3.dualstack.evil.io/x',
+		]) {
+			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed S3 endpoint/);
 		}
 	});
 
@@ -26,6 +58,7 @@ describe('validateUploadUrl', () => {
 		);
 		expect(url.search).toBe('?X-Amz-Signature=abc&part=1');
 		expect(url.pathname).toBe('/bucket/note.epub');
+		expect(url.protocol).toBe('https:');
 	});
 
 	it('rejects non-HTTPS schemes', () => {
@@ -39,21 +72,6 @@ describe('validateUploadUrl', () => {
 		}
 	});
 
-	it('rejects deceptive suffixes and unrelated hosts', () => {
-		for (const url of [
-			'https://amazon.com.evil.com/x',
-			'https://amazonaws.com.evil.com/x',
-			'https://evilamazonaws.com/x',
-			'https://amazon.com.co/x',
-			'https://www.amazon.co.uk/x',
-			'https://evil.com/x',
-			'https://cloudfront.net/x',
-			'https://amazon.com.attacker.io/x',
-		]) {
-			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed Amazon host/);
-		}
-	});
-
 	it('rejects userinfo', () => {
 		expect(() => validateUploadUrl('https://user:pass@s3.amazonaws.com/x')).toThrow(
 			/userinfo/,
@@ -63,6 +81,7 @@ describe('validateUploadUrl', () => {
 	it('rejects non-default ports', () => {
 		for (const url of [
 			'https://s3.amazonaws.com:8443/x',
+			'https://bucket.s3.amazonaws.com:8080/x',
 			'https://amazon.com:8080/x',
 		]) {
 			expect(() => validateUploadUrl(url), url).toThrow(/non-default port/);

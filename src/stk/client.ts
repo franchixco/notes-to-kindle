@@ -6,6 +6,9 @@ import { signRequest, isoUtcNow } from './signer';
 import type { StkCredentials } from './credentials';
 export type { StkCredentials } from './credentials';
 import { validateUploadUrl } from './upload';
+import { uploadToPresignedUrl } from './presign-upload';
+import type { UploadRequestFactory } from './presign-upload';
+import { parseOwnedDevicesResponse, parseUploadUrlResponse } from './response-shape';
 import { STK_USER_AGENT } from './user-agent';
 
 import type crypto from 'crypto';
@@ -50,84 +53,25 @@ interface AccessTokenResponse {
 	access_token: string;
 }
 
-interface GetOwnedDevicesResponse {
-	ownedDevices: Array<{ deviceSerialNumber: string; deviceName: string }>;
-}
-
-interface GetUploadUrlResponse {
-	uploadUrl: string;
-	stkToken: string;
-}
-
 function uploadFileToPresignedUrl(url: string, fileBuffer: Buffer): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const target = validateUploadUrl(url);
-		const req = nodeHttps.request(
-			{
-				protocol: target.protocol,
-				hostname: target.hostname,
-				port: target.port,
-				path: `${target.pathname}${target.search}`,
-				method: 'PUT',
-				headers: {
-					'Content-Length': String(fileBuffer.length),
-					'Accept-Encoding': 'gzip, deflate',
-					'Accept-Language': 'en-US,*',
-					'User-Agent': STK_USER_AGENT,
-				},
-			},
-			(res) => {
-				const chunks: Buffer[] = [];
-				res.on('data', (chunk: Buffer | string) => {
-					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-				});
-				res.on('end', () => {
-					if (res.statusCode === 200) {
-						resolve();
-						return;
-					}
-					const body = Buffer.concat(chunks).toString('utf8').trim().replace(/\s+/g, ' ').slice(0, 400);
-					reject(new Error(body.length > 0 ? `Upload failed: HTTP ${res.statusCode} | ${body}` : `Upload failed: HTTP ${res.statusCode}`));
-				});
-			},
-		);
-		req.on('error', reject);
-		req.write(fileBuffer);
-		req.end();
-	});
+	const target = validateUploadUrl(url);
+	const requestFactory: UploadRequestFactory = (options) => nodeHttps.request(options);
+	return uploadToPresignedUrl(target, fileBuffer, requestFactory);
 }
 
-function describeRequestError(err: unknown): string {
-	const toText = (value: unknown): string => {
-		if (typeof value === 'string') return value;
-		if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-		try {
-			return JSON.stringify(value);
-		} catch {
-			return String(value);
-		}
-	};
-
-	if (err instanceof Error) return err.message;
-	if (typeof err === 'string') return err;
-	if (err && typeof err === 'object') {
-		const maybe = err as {
-			status?: unknown;
-			statusCode?: unknown;
-			message?: unknown;
-			body?: unknown;
-		};
-		const parts = [maybe.message, maybe.status, maybe.statusCode, maybe.body]
-			.filter((value) => value !== undefined && value !== null)
-			.map((value) => toText(value));
-		if (parts.length > 0) return parts.join(' | ');
-	}
-	return toText(err);
+// Remote response bodies must never reach thrown errors or logs. A remote
+// failure is reported as operation + HTTP status; transport failures are
+// reported with a fixed sanitized category.
+function statusError(operation: string, status: number): Error {
+	return new Error(`${operation} failed: HTTP ${status}`);
 }
 
-function summarizeResponse(response: RequestUrlResponse): string {
-	const body = response.text.trim().replace(/\s+/g, ' ').slice(0, 400);
-	return body.length > 0 ? `HTTP ${response.status} | ${body}` : `HTTP ${response.status}`;
+function transportError(operation: string): Error {
+	return new Error(`${operation} failed: request error`);
+}
+
+function invalidResponseBodyError(operation: string): Error {
+	return new Error(`${operation} failed: invalid response body`);
 }
 
 interface SendToKindleRequestBody {
@@ -206,13 +150,21 @@ async function exchangeCodeForAccessToken(
 			body: JSON.stringify(body),
 			throw: false,
 		});
-	} catch (err) {
-		throw new Error(`Token exchange failed: ${describeRequestError(err)}`);
+	} catch {
+		throw transportError('Token exchange');
 	}
 	if (response.status < 200 || response.status >= 300) {
-		throw new Error(`Token exchange failed: ${summarizeResponse(response)}`);
+		throw statusError('Token exchange', response.status);
 	}
-	const parsed = response.json as AccessTokenResponse;
+	let parsed: AccessTokenResponse;
+	try {
+		parsed = response.json as AccessTokenResponse;
+	} catch {
+		throw invalidResponseBodyError('Token exchange');
+	}
+	if (typeof parsed.access_token !== 'string' || parsed.access_token.length === 0) {
+		throw invalidResponseBodyError('Token exchange');
+	}
 	return parsed.access_token;
 }
 
@@ -236,11 +188,11 @@ async function registerDeviceWithToken(
 			body: xmlBody,
 			throw: false,
 		});
-	} catch (err) {
-		throw new Error(`Register device failed: ${describeRequestError(err)}`);
+	} catch {
+		throw transportError('Register device');
 	}
 	if (response.status < 200 || response.status >= 300) {
-		throw new Error(`Register device failed: ${summarizeResponse(response)}`);
+		throw statusError('Register device', response.status);
 	}
 
 	const xml = response.text;
@@ -267,11 +219,11 @@ export async function registerDevice(
 	return registerDeviceWithToken(accessToken);
 }
 
-async function signedPost<T>(
+async function signedPost(
 	creds: StkCredentials,
 	path: string,
 	body: unknown,
-): Promise<T> {
+): Promise<unknown> {
 	const bodyJson = JSON.stringify(body, null, 4);
 	const signingDate = isoUtcNow();
 	const digest = signRequest(
@@ -282,39 +234,45 @@ async function signedPost<T>(
 		signingDate,
 		bodyJson,
 	);
-	const response = await requestUrl({
-		url: `${STK_BASE}${path}`,
-		method: 'POST',
-		headers: {
-			'X-ADP-Request-Digest': digest,
-			'X-ADP-Authentication-Token': creds.adpToken,
-			'Content-Type': 'application/json',
-			Accept: 'application/json',
-			'Accept-Encoding': 'gzip, deflate',
-			'Accept-Language': 'en-US,*',
-			'User-Agent': STK_USER_AGENT,
-		},
-		body: bodyJson,
-		throw: false,
-	});
-	if (response.status < 200 || response.status >= 300) {
-		throw new Error(`${path} failed: ${summarizeResponse(response)}`);
+	let response: RequestUrlResponse;
+	try {
+		response = await requestUrl({
+			url: `${STK_BASE}${path}`,
+			method: 'POST',
+			headers: {
+				'X-ADP-Request-Digest': digest,
+				'X-ADP-Authentication-Token': creds.adpToken,
+				'Content-Type': 'application/json',
+				Accept: 'application/json',
+				'Accept-Encoding': 'gzip, deflate',
+				'Accept-Language': 'en-US,*',
+				'User-Agent': STK_USER_AGENT,
+			},
+			body: bodyJson,
+			throw: false,
+		});
+	} catch {
+		throw transportError(path);
 	}
-	return response.json as T;
+	if (response.status < 200 || response.status >= 300) {
+		throw statusError(path, response.status);
+	}
+	try {
+		return response.json as unknown;
+	} catch {
+		throw invalidResponseBodyError(path);
+	}
 }
 
 export async function listOwnedDevices(
 	creds: StkCredentials,
 ): Promise<OwnedDevice[]> {
-	const parsed = await signedPost<GetOwnedDevicesResponse>(
+	const parsed = await signedPost(
 		creds,
 		'/GetListOfOwnedDevices',
 		{ ClientInfo: DEFAULT_CLIENT_INFO },
 	);
-	return parsed.ownedDevices.map((d) => ({
-		serialNumber: d.deviceSerialNumber,
-		deviceName: d.deviceName,
-	}));
+	return parseOwnedDevicesResponse(parsed);
 }
 
 export async function sendToKindle(
@@ -324,11 +282,12 @@ export async function sendToKindle(
 	const stats = nodeFs.statSync(opts.filePath);
 	const fileSize = stats.size;
 
-	const uploadData = await signedPost<GetUploadUrlResponse>(
+	const uploadResponse = await signedPost(
 		creds,
 		'/GetUploadUrl',
 		{ ClientInfo: DEFAULT_CLIENT_INFO, fileSize },
 	);
+	const uploadData = parseUploadUrlResponse(uploadResponse);
 
 	const fileBuffer = nodeFs.readFileSync(opts.filePath);
 
@@ -349,7 +308,7 @@ export async function sendToKindle(
 		targetDevices: opts.targetSerials,
 	};
 
-	await signedPost<unknown>(creds, '/SendToKindle', sendBody);
+	await signedPost(creds, '/SendToKindle', sendBody);
 }
 
 export function buildAmazonAuthUrl(pkce: PkcePair): string {
@@ -373,11 +332,4 @@ export function buildAmazonAuthUrl(pkce: PkcePair): string {
 		disableLoginPrepopulate: '1',
 	});
 	return `https://www.amazon.com/ap/signin?${params.toString()}`;
-}
-
-export function parseAuthorizationCode(redirectUrl: string): string {
-	const u = new URL(redirectUrl);
-	const code = u.searchParams.get('openid.oa2.authorization_code');
-	if (!code) throw new Error('No authorization_code in URL');
-	return code;
 }

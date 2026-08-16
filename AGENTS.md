@@ -6,7 +6,7 @@
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
 - What it does: sends Obsidian notes to Kindle as EPUB by talking directly to Amazon's **undocumented/internal Send to Kindle endpoints** (`api.amazon.com`, `firs-ta-g7g.amazon.com`, `stkservice.amazon.com`). This is an **unofficial** integration: not created, sponsored, approved, or endorsed by Amazon; Kindle and Send to Kindle are Amazon marks. There is no public Send to Kindle API. The plugin registers a synthetic device, may stop working without notice, and may carry account/terms risk. Never claim otherwise in docs or copy.
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
-- Required release artifacts: `main.js`, `manifest.json`, `styles.css` (empty file), and the docs `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`.
+- Required Obsidian release artifacts: `main.js` and `manifest.json`; include `styles.css` only when non-empty. Releases also attach `LICENSE` and `THIRD_PARTY_NOTICES.md` for attribution.
 - `isDesktopOnly: true` — requires Node APIs (`crypto`) and Electron (sandboxed BrowserWindow for OAuth) not available on Obsidian mobile.
 - Privacy posture: no developer server, no telemetry, no analytics. Credentials live in OS keychain via `app.secretStorage`. Each authentication and each send is user initiated; the user accepts the unofficial integration risk (disclosed in README).
 
@@ -88,9 +88,9 @@ bun run build
         constants.ts
       types.ts         # TypeScript interfaces and types
     ```
-- **Do not commit build artifacts**: Never commit `node_modules/` or other generated files to version control. `main.js` is the exception: this plugin commits the built `main.js` because the release flow attaches it to GitHub releases. Keep it in sync with `src/` before tagging.
+- **Do not commit build artifacts**: Never commit `node_modules/`, generated `main.js`, or other generated files. CI builds `main.js` from the tagged source and attaches it to the GitHub release.
 - Keep the plugin small. Avoid large dependencies. Prefer browser-compatible packages.
-- Generated output should be placed at the plugin root or `dist/` depending on your build setup. Release artifacts must end up at the top level of the plugin folder in the vault (`main.js`, `manifest.json`, `styles.css`).
+- Generated output should be placed at the plugin root or `dist/` depending on your build setup. Release artifacts must end up at the top level of the plugin folder in the vault (`main.js`, `manifest.json`, and optional `styles.css`).
 
 ## Manifest rules (`manifest.json`)
 
@@ -102,7 +102,7 @@ bun run build
     - `description`
     - `isDesktopOnly` (boolean)
     - Optional: `author`, `authorUrl`, `fundingUrl` (string or map)
-- Never change `id` after release. Treat it as stable API. If the repo is later renamed to `franchixco/send-to-kindle`, the id stays `send-to-kindle`.
+- Treat `send-to-kindle` as stable API from the first official community release (`0.1.1`) onward. Pre-publication development builds used the legacy local ID `obsidian-kindle-stk`; those installs must be migrated to the `send-to-kindle` plugin folder.
 - Keep `minAppVersion` accurate when using newer APIs.
 - Canonical requirements are coded here: https://github.com/obsidianmd/obsidian-releases/blob/master/.github/workflows/validate-plugin-entry.yml
 
@@ -126,6 +126,7 @@ bun run build
 - Bump `version` in `manifest.json` (SemVer) and update `versions.json` to map plugin version → minimum app version.
 - Create a GitHub release whose tag exactly matches `manifest.json`'s `version`. Do not use a leading `v`.
 - Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
+- The release workflow creates a **draft** after building, testing, attesting, and attaching assets. Verify the draft assets, then publish it manually; Obsidian's community review cannot consume a draft release.
 - After the initial release, follow the process to add/update your plugin in the community catalog as required.
 
 ## Security, privacy, and compliance
@@ -294,7 +295,7 @@ this.registerInterval(
 
 ## Troubleshooting
 
-- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/send-to-kindle/`.
+- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and optional `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/send-to-kindle/`.
 - Build issues: if `main.js` is missing or stale, run `bun run build` (or `bun run dev` for watch) to compile the TypeScript source. Do not use npm.
 - Commands not appearing: verify `addCommand` runs after `onload` and IDs are unique.
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.

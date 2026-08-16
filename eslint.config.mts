@@ -1,12 +1,11 @@
-import tseslint from 'typescript-eslint';
+import { defineConfig, globalIgnores } from 'eslint/config';
 import obsidianmd from 'eslint-plugin-obsidianmd';
 import globals from 'globals';
-import { globalIgnores } from 'eslint/config';
 
 // Brands whose official casing must be preserved in this plugin's UI copy.
 const BRANDS = ['Obsidian', 'Amazon', 'Kindle', 'Send to Kindle'];
 
-export default tseslint.config(
+export default defineConfig([
 	globalIgnores([
 		'node_modules',
 		'dist',
@@ -15,7 +14,7 @@ export default tseslint.config(
 		'versions.json',
 		'main.js',
 		'package.json',
-		'package-lock.json',
+		'bun.lock',
 		'tsconfig.json',
 	]),
 	{
@@ -56,4 +55,4 @@ export default tseslint.config(
 			'import/no-extraneous-dependencies': 'off',
 		},
 	},
-);
+]);

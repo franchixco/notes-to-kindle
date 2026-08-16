@@ -87,10 +87,6 @@ function flattenCallouts(md: string): string {
 	});
 }
 
-function convertHighlights(md: string): string {
-	return md.replace(/==(.+?)==/g, (_: string, inner: string) => `<mark>${inner}</mark>`);
-}
-
 export async function extractNote(app: App, file: TFile): Promise<ExtractedNote> {
 	const raw = await app.vault.read(file);
 	const embeds: Embed[] = [];
@@ -99,7 +95,6 @@ export async function extractNote(app: App, file: TFile): Promise<ExtractedNote>
 	md = await resolveNoteEmbeds(app, md, embeds, file.path);
 	md = normalizeWikilinks(md);
 	md = flattenCallouts(md);
-	md = convertHighlights(md);
 
 	return {
 		title: file.basename,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { DOMParser } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 import { buildEpub } from '../src/epub/builder';
 import { renderBodyHtml } from '../src/epub/render';
@@ -16,47 +17,22 @@ async function chapterHtml(md: string): Promise<string> {
 	return await chapter.async('string');
 }
 
-// Minimal well-formedness check for the generated XHTML: balanced element
-// nesting, self-closing void elements, no stray '<' inside text nodes.
-const TAG_RE = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^"'<>])*?)(\/?)>/g;
-const VOID_ELEMENTS = new Set([
-	'br',
-	'hr',
-	'img',
-	'link',
-	'meta',
-	'input',
-	'col',
-	'area',
-	'base',
-	'embed',
-	'source',
-	'track',
-	'wbr',
-]);
-
+// Real XML well-formedness check through @xmldom/xmldom: any warning, error or
+// fatalError reported by the parser (or a thrown ParseError) fails the test.
 function assertParsesAsXml(xml: string): void {
-	const body = xml.replace(/^\s*<\?xml[^>]*\?>\s*/, '');
-	const stack: string[] = [];
-	let lastIndex = 0;
-	for (const match of body.matchAll(TAG_RE)) {
-		const text = body.slice(lastIndex, match.index);
-		lastIndex = match.index + match[0].length;
-		expect(text, `stray '<' in text: ${JSON.stringify(text)}`).not.toContain('<');
-		const tag = match[0];
-		const name = match[1]!;
-		const isClosing = tag.startsWith('</');
-		const selfClosing = match[3] === '/' || tag.endsWith('/>');
-		if (isClosing) {
-			const open = stack.pop();
-			expect(open, `mismatched </${name}>`).toBe(name);
-		} else if (selfClosing || VOID_ELEMENTS.has(name)) {
-			// Void or self-closing element: no pairing required.
-		} else {
-			stack.push(name);
-		}
+	const problems: string[] = [];
+	try {
+		new DOMParser({
+			onError: (level, message) => {
+				if (level === 'warning' || level === 'error' || level === 'fatalError') {
+					problems.push(`${level}: ${message}`);
+				}
+			},
+		}).parseFromString(xml, 'application/xml');
+	} catch (error) {
+		problems.push(String(error));
 	}
-	expect(stack, `unclosed elements: ${stack.join(', ')}`).toEqual([]);
+	expect(problems, xml).toEqual([]);
 }
 
 describe('renderBodyHtml', () => {
@@ -84,15 +60,116 @@ describe('renderBodyHtml', () => {
 		expect(html).not.toContain('<img');
 	});
 
-	it('preserves only the mark highlight tags produced by convertHighlights', () => {
+	it('escapes literal mark tags instead of treating them as highlight markup', () => {
 		const html = renderBodyHtml('<mark>importante</mark> y <mark>más</mark>');
-		expect(html).toContain('<mark>importante</mark>');
-		expect(html).toContain('<mark>más</mark>');
+		expect(html).toContain('&lt;mark&gt;importante&lt;/mark&gt;');
+		expect(html).not.toContain('<mark>importante</mark>');
+	});
+
+	it('does not allow independent literal open/close mark tags', () => {
+		const html = renderBodyHtml('abierto <mark> y cerrado </mark>');
+		expect(html).toContain('&lt;mark&gt;');
+		expect(html).toContain('&lt;/mark&gt;');
+		expect(html).not.toMatch(/<mark>(?!<\/mark>)/);
 	});
 
 	it('escapes attacker-controlled mark attributes', () => {
 		const html = renderBodyHtml('<mark onclick="x()">a</mark>');
 		expect(html).not.toContain('<mark onclick');
+		expect(html).toContain('&lt;mark onclick=');
+	});
+
+	it('renders Obsidian ==highlights== as structural mark elements', () => {
+		const html = renderBodyHtml('==importante== y ==más==');
+		expect(html).toContain('<mark>importante</mark>');
+		expect(html).toContain('<mark>más</mark>');
+	});
+
+	it('renders nested markdown inside a highlight', () => {
+		const html = renderBodyHtml('==**negrita** y `codigo`==');
+		expect(html).toContain('<mark><strong>negrita</strong> y <code>codigo</code></mark>');
+	});
+
+	it('escapes raw markup nested inside a highlight', () => {
+		const html = renderBodyHtml('==<mark>x</mark>==');
+		expect(html).toContain('<mark>&lt;mark&gt;x&lt;/mark&gt;</mark>');
+		expect(html).not.toContain('<mark><mark>');
+	});
+
+	it('closes a highlight at the first closing delimiter', () => {
+		const html = renderBodyHtml('==a==b==');
+		expect(html).toContain('<mark>a</mark>b==');
+	});
+
+	it('leaves unmatched open highlight delimiters as literal text', () => {
+		const html = renderBodyHtml('==abierto');
+		expect(html).toContain('==abierto');
+		expect(html).not.toContain('<mark>');
+	});
+
+	it('leaves a closing-only highlight delimiter as literal text', () => {
+		const html = renderBodyHtml('cerrado==');
+		expect(html).toContain('cerrado==');
+		expect(html).not.toContain('<mark>');
+	});
+
+	it('keeps text without highlight delimiters intact', () => {
+		const html = renderBodyHtml('sin delimitadores de resaltado en absoluto');
+		expect(html).not.toContain('<mark>');
+		expect(html).toContain('sin delimitadores de resaltado en absoluto');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
+	});
+
+	it('neutralizes XML-invalid numeric character references', () => {
+		const html = renderBodyHtml(
+			'&#0; &#x0; &#X0; &#x8; &#x1F; &#xD800; &#xDFFF; &#xFFFE; &#xFFFF; &#x110000; &#x7FFFFFFF;',
+		);
+		for (const literal of ['#0;', '#x0;', '#X0;', '#x8;', '#x1F;', '#xD800;', '#xDFFF;', '#xFFFE;', '#xFFFF;', '#x110000;', '#x7FFFFFFF;']) {
+			expect(html, literal).toContain(`&amp;${literal}`);
+		}
+		expect(html).not.toContain('&#0;');
+		expect(html).not.toContain('&#xD800;');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
+	});
+
+	it('preserves valid XML 1.0 numeric character references at the boundaries', () => {
+		const html = renderBodyHtml(
+			'&#9; &#10; &#13; &#x20; &#xD7FF; &#xE000; &#xFFFD; &#x10000; &#x10FFFF;',
+		);
+		for (const ref of ['&#9;', '&#10;', '&#13;', '&#x20;', '&#xD7FF;', '&#xE000;', '&#xFFFD;', '&#x10000;', '&#x10FFFF;']) {
+			expect(html, ref).toContain(ref);
+		}
+		expect(html).not.toContain('&amp;#9;');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
+	});
+
+	it('turns unknown named entities into literal safe text', () => {
+		const html = renderBodyHtml('&copy; 2026 y &nbsp;');
+		expect(html).toContain('&amp;copy;');
+		expect(html).toContain('&amp;nbsp;');
+		expect(html).not.toContain('&copy;');
+		expect(html).not.toContain('&nbsp;');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
+	});
+
+	it('preserves valid XML entities and numeric character references', () => {
+		const html = renderBodyHtml('&amp; &lt; &gt; &quot; &apos; &#169; &#x00A9;');
+		expect(html).toContain('&amp;');
+		expect(html).toContain('&lt;');
+		expect(html).toContain('&gt;');
+		expect(html).toContain('&quot;');
+		expect(html).toContain('&apos;');
+		expect(html).toContain('&#169;');
+		expect(html).toContain('&#x00A9;');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
+	});
+
+	it('neutralizes malformed ampersands', () => {
+		const html = renderBodyHtml('AT&T y &copy sin punto y coma y &&');
+		expect(html).toContain('AT&amp;T');
+		expect(html).toContain('&amp;copy');
+		expect(html).toContain('&amp;&amp;');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
 	});
 
 	it('renders markdown images as safe alt text without any img or src', () => {
@@ -139,7 +216,7 @@ describe('renderBodyHtml', () => {
 
 	it('is well-formed XML for a mixed document', () => {
 		const html = renderBodyHtml(
-			'# Título\n\nTexto con <mark>resaltado</mark>.\n\n- uno\n- dos\n\n`code` y **negrita**\n\n> cita\n',
+			'# Título\n\nTexto con ==resaltado==.\n\n- uno\n- dos\n\n`code` y **negrita**\n\n> cita\n',
 		);
 		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
 	});
@@ -160,9 +237,16 @@ describe('buildEpub', () => {
 		assertParsesAsXml(html);
 	});
 
-	it('preserves mark highlights through the full EPUB build', async () => {
-		const html = await chapterHtml('Esto es <mark>muy importante</mark>.');
+	it('preserves Obsidian highlights through the full EPUB build', async () => {
+		const html = await chapterHtml('Esto es ==muy importante==.');
 		expect(html).toContain('<mark>muy importante</mark>');
+		assertParsesAsXml(html);
+	});
+
+	it('escapes literal mark tags in the full chapter while keeping highlights', async () => {
+		const html = await chapterHtml('<mark>literal</mark> y ==resaltado==');
+		expect(html).toContain('&lt;mark&gt;literal&lt;/mark&gt;');
+		expect(html).toContain('<mark>resaltado</mark>');
 		assertParsesAsXml(html);
 	});
 
@@ -178,6 +262,25 @@ describe('buildEpub', () => {
 		const html = await chapterHtml('![diagrama](https://evil.example/d.png)');
 		expect(html).toContain('diagrama');
 		expect(html).not.toContain('https://evil.example');
+		assertParsesAsXml(html);
+	});
+
+	it('produces a fully parseable chapter for adversarial content', async () => {
+		const html = await chapterHtml(
+			'<script>alert(1)</script>\n\n==<b onmouseover="x()">hl</b>== &copy; &bogus; AT&T\n\n<div onclick="y()">z</div> ==a==b==\n\n---\n\n- [x] listo\n\n![alt](javascript:void(0))\n\n<mark>literal</mark> y ==resaltado==\n',
+		);
+		assertParsesAsXml(html);
+		expect(html).not.toContain('<script');
+		expect(html).toContain('<mark>&lt;b onmouseover=&quot;x()&quot;&gt;hl&lt;/b&gt;</mark>');
+	});
+
+	it('neutralizes invalid numeric references through the full chapter', async () => {
+		const html = await chapterHtml('&#0; &#xD800; &#x110000; y validos &#9; &#x10FFFF;');
+		expect(html).toContain('&amp;#0;');
+		expect(html).toContain('&amp;#xD800;');
+		expect(html).toContain('&amp;#x110000;');
+		expect(html).toContain('&#9;');
+		expect(html).toContain('&#x10FFFF;');
 		assertParsesAsXml(html);
 	});
 

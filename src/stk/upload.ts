@@ -8,9 +8,6 @@
  * preserved.
  */
 
-const REGION_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
-const BUCKET_LABEL = '[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?';
-
 // Exact S3 endpoint host forms (lowercased, full-string match):
 //   s3.amazonaws.com
 //   s3.<region>.amazonaws.com
@@ -20,17 +17,16 @@ const BUCKET_LABEL = '[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?';
 //   <bucket>.s3.dualstack.<region>.amazonaws.com
 //   <bucket>.s3-<region>.amazonaws.com (legacy)
 const S3_HOST_PATTERNS = [
-	new RegExp(`^s3\\.amazonaws\\.com$`),
-	new RegExp(`^s3\\.${REGION_LABEL}\\.amazonaws\\.com$`),
-	new RegExp(`^s3\\.dualstack\\.${REGION_LABEL}\\.amazonaws\\.com$`),
-	new RegExp(`^${BUCKET_LABEL}\\.s3\\.amazonaws\\.com$`),
-	new RegExp(`^${BUCKET_LABEL}\\.s3\\.${REGION_LABEL}\\.amazonaws\\.com$`),
-	new RegExp(`^${BUCKET_LABEL}\\.s3\\.dualstack\\.${REGION_LABEL}\\.amazonaws\\.com$`),
-	new RegExp(`^${BUCKET_LABEL}\\.s3-${REGION_LABEL}\\.amazonaws\\.com$`),
+	/^s3\.amazonaws\.com$/,
+	/^s3\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.amazonaws\.com$/,
+	/^s3\.dualstack\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.amazonaws\.com$/,
+	/^[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?\.s3\.amazonaws\.com$/,
+	/^[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?\.s3\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.amazonaws\.com$/,
+	/^[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?\.s3\.dualstack\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.amazonaws\.com$/,
+	/^[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?\.s3-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.amazonaws\.com$/,
 ];
 
-const IPV4_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
-const IPV4_LITERAL_RE = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
+const IPV4_LITERAL_RE = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 function isIpLiteral(hostname: string): boolean {
 	return IPV4_LITERAL_RE.test(hostname) || hostname.startsWith('[');

@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, requireApiVersion, Setting } from 'obsidian';
 import type { SettingDefinitionItem } from 'obsidian';
 import type { OwnedDevice } from './stk/client';
+import { LatestAsyncRunner } from './lifecycle';
 import type KindleStkPlugin from './main';
 
 export interface KindleStkSettings {
@@ -146,10 +147,11 @@ export class KindleStkSettingTab extends PluginSettingTab {
 	plugin: KindleStkPlugin;
 
 	// The cache lets declarative re-renders reuse the last device fetch; the
-	// generation counter discards stale completions after refresh/disconnect.
+	// latest-wins runner and the render generation discard stale completions
+	// after refresh/disconnect/hide without clearing newer state.
 	private destinationCache: { devices: OwnedDevice[]; error: string | null } | null = null;
-	private destinationLoadInFlight = false;
-	private destinationLoadGeneration = 0;
+	private destinationLoads = new LatestAsyncRunner();
+	private legacyRenderGeneration = 0;
 
 	constructor(app: App, plugin: KindleStkPlugin) {
 		super(app, plugin);
@@ -159,7 +161,8 @@ export class KindleStkSettingTab extends PluginSettingTab {
 	// Legacy path for Obsidian <1.13; 1.13+ bypasses display() when
 	// getSettingDefinitions() returns a non-empty array.
 	display(): void {
-		void this.renderLegacy();
+		const generation = ++this.legacyRenderGeneration;
+		void this.renderLegacy(generation);
 	}
 
 	override hide(): void {
@@ -253,12 +256,14 @@ export class KindleStkSettingTab extends PluginSettingTab {
 	}
 
 	private redraw(): void {
+		const generation = ++this.legacyRenderGeneration;
 		this.containerEl.empty();
-		void this.renderLegacy();
+		void this.renderLegacy(generation);
 	}
 
-	private async renderLegacy(): Promise<void> {
+	private async renderLegacy(generation: number): Promise<void> {
 		const { containerEl } = this;
+		if (generation !== this.legacyRenderGeneration) return;
 		containerEl.empty();
 		const isAuthenticated = this.plugin.isAuthenticated();
 		const accountState: AccountState = {
@@ -268,6 +273,7 @@ export class KindleStkSettingTab extends PluginSettingTab {
 		const { devices, error: deviceLoadError } = isAuthenticated
 			? await this.plugin.getOwnedDevicesStatus()
 			: { devices: [], error: null };
+		if (generation !== this.legacyRenderGeneration) return;
 
 		new Setting(containerEl)
 			.setName('Authentication')
@@ -326,7 +332,7 @@ export class KindleStkSettingTab extends PluginSettingTab {
 		if (state.kind === 'loading') {
 			this.loadDestinations();
 			return () => {
-				this.destinationLoadGeneration += 1;
+				this.destinationLoads.invalidate();
 			};
 		}
 		return undefined;
@@ -347,25 +353,21 @@ export class KindleStkSettingTab extends PluginSettingTab {
 	}
 
 	private loadDestinations(): void {
-		if (this.destinationLoadInFlight) {
-			return;
-		}
-		const generation = this.destinationLoadGeneration;
-		this.destinationLoadInFlight = true;
+		const op = this.destinationLoads.begin();
+		if (op === null) return;
 		void this.plugin.getOwnedDevicesStatus().then((result) => {
-			this.destinationLoadInFlight = false;
-			if (generation !== this.destinationLoadGeneration) {
-				return;
-			}
+			if (!op.isCurrent()) return;
 			this.destinationCache = result;
 			this.refresh();
+		}).finally(() => {
+			op.finish();
 		});
 	}
 
 	private invalidateDestinations(): void {
+		this.legacyRenderGeneration += 1;
+		this.destinationLoads.invalidate();
 		this.destinationCache = null;
-		this.destinationLoadInFlight = false;
-		this.destinationLoadGeneration += 1;
 	}
 
 	private async handleAuthenticate(): Promise<void> {

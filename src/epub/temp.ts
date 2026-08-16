@@ -18,7 +18,7 @@ export interface TempEpubFile {
  * more than once.
  */
 export function createTempEpubFile(data: Uint8Array): TempEpubFile {
-	const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'notes-to-ereader-'));
+	const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'send-to-kindle-'));
 	nodeFs.chmodSync(dir, 0o700);
 
 	const filePath = nodePath.join(dir, 'note.epub');

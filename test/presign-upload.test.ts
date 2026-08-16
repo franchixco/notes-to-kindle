@@ -297,7 +297,7 @@ describe('uploadToPresignedUrl', () => {
 				'Content-Length': String(TEST_PAYLOAD.length),
 				'Accept-Encoding': 'gzip, deflate',
 				'Accept-Language': 'en-US,*',
-				'User-Agent': 'Mozilla/5.0 (compatible; Agent/notes-to-ereader)',
+				'User-Agent': 'Mozilla/5.0 (compatible; Agent/send-to-kindle)',
 			},
 		});
 		expect(request.payload).toEqual(TEST_PAYLOAD);

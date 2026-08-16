@@ -1,9 +1,9 @@
 {
-	"id": "send-to-kindle",
-	"name": "Notes to Kindle",
-	"version": "0.1.1",
+	"id": "notes-to-ereader",
+	"name": "Notes to E-reader",
+	"version": "0.1.2",
 	"minAppVersion": "1.11.4",
-	"description": "Convert notes to EPUB locally and send them to Amazon Kindle using an unofficial desktop integration.",
+	"description": "Convert notes to EPUB locally and send them to your e-reader using an unofficial Amazon integration.",
 	"author": "franchixco",
 	"authorUrl": "https://github.com/franchixco",
 	"isDesktopOnly": true

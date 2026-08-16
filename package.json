@@ -1,10 +1,11 @@
 {
-	"name": "send-to-kindle",
-	"version": "0.1.1",
-	"description": "Convert notes to EPUB locally and send them to Amazon Kindle using an unofficial desktop integration.",
+	"name": "notes-to-ereader",
+	"version": "0.1.2",
+	"description": "Convert notes to EPUB locally and send them to your e-reader using an unofficial Amazon integration.",
 	"main": "main.js",
 	"type": "module",
 	"packageManager": "bun@1.3.14",
+	"repository": "https://github.com/franchixco/notes-to-ereader",
 	"scripts": {
 		"dev": "bun esbuild.config.mjs",
 		"build": "bunx tsc -noEmit -skipLibCheck && bun esbuild.config.mjs production",
@@ -17,7 +18,7 @@
 		"obsidian",
 		"kindle",
 		"epub",
-		"send-to-kindle",
+		"notes-to-ereader",
 		"stk",
 		"amazon"
 	],

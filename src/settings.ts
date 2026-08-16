@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import KindleStkPlugin from './main';
 
 export interface KindleStkSettings {
@@ -53,6 +53,21 @@ export class KindleStkSettingTab extends PluginSettingTab {
 				btn.onClick(() => void this.plugin.startOAuthFlow().then(() => this.redraw()));
 			});
 
+		if (isAuthenticated) {
+			new Setting(containerEl)
+				.setName('Disconnect')
+				.setDesc('Removes the saved credentials from this device only. To fully remove the connection, delete the synthetic "Send to Kindle" device from your Amazon account under Content & Devices → Devices.')
+				.addButton((btn) => {
+					btn.setButtonText('Disconnect');
+					btn.setClass('mod-warning');
+					btn.onClick(async () => {
+						await this.plugin.disconnect();
+						new Notice('Disconnected from Amazon on this device. If you want to fully revoke access, remove the synthetic "Send to Kindle" device from your Amazon account under Content & Devices → Devices.');
+						this.redraw();
+					});
+				});
+		}
+
 		new Setting(containerEl)
 			.setName('Default destination')
 			.setDesc(deviceLoadError
@@ -63,7 +78,7 @@ export class KindleStkSettingTab extends PluginSettingTab {
 					? 'Send to Kindle library only.'
 					: 'Authenticate first to load your destinations.')
 			.addDropdown((dropdown) => {
-				dropdown.addOption('', 'Send to kindle library');
+				dropdown.addOption('', 'Send to Kindle library');
 				for (const device of devices) {
 					dropdown.addOption(device.serialNumber, `${device.deviceName} (${device.serialNumber})`);
 				}

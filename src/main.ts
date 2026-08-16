@@ -2,30 +2,56 @@ import { Notice, Platform, Plugin, SuggestModal, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS, KindleStkSettings, KindleStkSettingTab } from './settings';
 import { extractNote } from './obsidian-extract/extract';
 import { buildEpub } from './epub/builder';
+import { createTempEpubFile } from './epub/temp';
 import { generatePkce } from './stk/oauth';
+import {
+	disconnectCredentials,
+	migrateLegacyCredentials,
+	readCredentials,
+	writeCredentials,
+	type StkCredentials,
+} from './stk/credentials';
+import { isRedirectUrl, parseAuthorizationCode } from './stk/redirect';
 import {
 	buildAmazonAuthUrl,
 	listOwnedDevices,
 	registerDevice,
 	sendToKindle,
 	type OwnedDevice,
-	type StkCredentials,
 } from './stk/client';
-import type os from 'os';
-import type fs from 'fs';
-import type path from 'path';
-
-const nodeOs = window.require('os') as typeof os;
-const nodeFs = window.require('fs') as typeof fs;
-const nodePath = window.require('path') as typeof path;
-
-const SECRET_KEY = 'stk-credentials';
 
 type SendDestinationOption = {
 	label: string;
 	description: string;
 	serials: string[];
 	isDefault: boolean;
+};
+
+type BeforeRequestDetails = { url: string };
+type BeforeRequestResponse = { cancel: boolean };
+type WebContents = {
+	on: (event: string, cb: (...args: unknown[]) => void) => void;
+	session: {
+		webRequest: {
+			onBeforeRequest: (
+				filter: { urls: string[] },
+				cb: (
+					details: BeforeRequestDetails,
+					callback: (response: BeforeRequestResponse) => void,
+				) => void,
+			) => void;
+		};
+	};
+	loadURL: (url: string) => Promise<void>;
+};
+type StkWindow = {
+	webContents: WebContents;
+	on: (event: string, cb: () => void) => void;
+	removeAllListeners: (event: string) => void;
+	close: () => void;
+};
+type RemoteModule = {
+	BrowserWindow: new (opts: Record<string, unknown>) => StkWindow;
 };
 
 class SendDestinationModal extends SuggestModal<SendDestinationOption> {
@@ -73,13 +99,20 @@ class SendDestinationModal extends SuggestModal<SendDestinationOption> {
 
 export default class KindleStkPlugin extends Plugin {
 	settings!: KindleStkSettings;
+	private authWindow: StkWindow | null = null;
+	private authInProgress = false;
+	private authTimeoutId: number | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
+		if (migrateLegacyCredentials(this.app.secretStorage)) {
+			new Notice('Migrated stored Send to Kindle credentials to the new secure key.');
+		}
+
 		this.addCommand({
 			id: 'send-to-kindle',
-			name: 'Send current note to kindle',
+			name: 'Send current note to Kindle',
 			editorCallback: (_editor, view) => {
 				if (view.file) void this.sendToKindle(view.file);
 			},
@@ -87,11 +120,27 @@ export default class KindleStkPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'authenticate-amazon',
-			name: 'Authenticate with amazon',
+			name: 'Authenticate with Amazon',
 			callback: () => void this.startOAuthFlow(),
 		});
 
 		this.addSettingTab(new KindleStkSettingTab(this.app, this));
+	}
+
+	onunload(): void {
+		this.authInProgress = false;
+		if (this.authTimeoutId !== null) {
+			window.clearTimeout(this.authTimeoutId);
+			this.authTimeoutId = null;
+		}
+		const win = this.authWindow;
+		this.authWindow = null;
+		if (win) {
+			try {
+				win.removeAllListeners('closed');
+				win.close();
+			} catch { void 0; }
+		}
 	}
 
 	async loadSettings(): Promise<void> {
@@ -111,17 +160,17 @@ export default class KindleStkPlugin extends Plugin {
 	}
 
 	private getCredentials(): StkCredentials | null {
-		const raw = this.app.secretStorage.getSecret(SECRET_KEY);
-		if (!raw) return null;
-		try {
-			return JSON.parse(raw) as StkCredentials;
-		} catch {
-			return null;
-		}
+		return readCredentials(this.app.secretStorage);
 	}
 
 	private storeCredentials(creds: StkCredentials): void {
-		this.app.secretStorage.setSecret(SECRET_KEY, JSON.stringify(creds));
+		writeCredentials(this.app.secretStorage, creds);
+	}
+
+	async disconnect(): Promise<void> {
+		disconnectCredentials(this.app.secretStorage);
+		this.settings.lastDeviceSerial = null;
+		await this.saveSettings();
 	}
 
 	getAuthenticatedAccountLabel(): string | null {
@@ -147,37 +196,14 @@ export default class KindleStkPlugin extends Plugin {
 	}
 
 	async startOAuthFlow(): Promise<void> {
+		if (this.authInProgress || this.authWindow) {
+			new Notice('Authentication is already in progress.');
+			return;
+		}
 		if (!Platform.isDesktopApp) {
 			new Notice('Authentication requires the desktop version of Obsidian.');
 			return;
 		}
-
-		type BeforeRequestDetails = { url: string };
-		type BeforeRequestResponse = { cancel: boolean };
-		type WebContents = {
-			on: (event: string, cb: (...args: unknown[]) => void) => void;
-			session: {
-				webRequest: {
-					onBeforeRequest: (
-						filter: { urls: string[] },
-						cb: (
-							details: BeforeRequestDetails,
-							callback: (response: BeforeRequestResponse) => void,
-						) => void,
-					) => void;
-				};
-			};
-			loadURL: (url: string) => Promise<void>;
-		};
-		type StkWindow = {
-			webContents: WebContents;
-			on: (event: string, cb: () => void) => void;
-			removeAllListeners: (event: string) => void;
-			close: () => void;
-		};
-		type RemoteModule = {
-			BrowserWindow: new (opts: Record<string, unknown>) => StkWindow;
-		};
 
 		const w = window as unknown as { require?: (mod: string) => unknown };
 		const req = w.require;
@@ -202,92 +228,120 @@ export default class KindleStkPlugin extends Plugin {
 			return;
 		}
 
-		const pkce = await generatePkce();
-		const authUrl = buildAmazonAuthUrl(pkce);
+		this.authInProgress = true;
 
-		const authCode = await new Promise<string>((resolve, reject) => {
-			const partition = `stk-oauth-${Date.now()}`;
-			const win = new remote.BrowserWindow({
-				width: 500,
-				height: 730,
-				show: true,
-				title: 'Authenticate with Amazon',
-				webPreferences: {
-					nodeIntegration: false,
-					contextIsolation: true,
-					partition,
-				},
-			});
+		let pkce: Awaited<ReturnType<typeof generatePkce>>;
+		let authUrl: string;
+		try {
+			pkce = await generatePkce();
+			authUrl = buildAmazonAuthUrl(pkce);
+		} catch (err) {
+			this.authInProgress = false;
+			const msg = err instanceof Error ? err.message : 'Could not prepare the authentication request';
+			new Notice('Authentication cancelled: ' + msg);
+			return;
+		}
 
-			let settled = false;
-			const extractCode = (url: string): string | null => {
-				if (!url.includes('openid.oa2.authorization_code=')) return null;
-				try {
-					return new URL(url).searchParams.get('openid.oa2.authorization_code');
-				} catch {
-					return null;
-				}
-			};
-			const done = (fn: () => void): void => {
-				if (settled) return;
-				settled = true;
-				try { win.removeAllListeners('closed'); win.close(); } catch { void 0; }
-				fn();
-			};
+		let authCode: string;
+		try {
+			authCode = await new Promise<string>((resolve, reject) => {
+				const partition = `stk-oauth-${Date.now()}`;
+				const win = new remote.BrowserWindow({
+					width: 500,
+					height: 730,
+					show: true,
+					title: 'Authenticate with Amazon',
+					webPreferences: {
+						nodeIntegration: false,
+						contextIsolation: true,
+						sandbox: true,
+						partition,
+					},
+				});
+				this.authWindow = win;
 
-			const checkUrl = (url: string): boolean => {
-				if (settled) return false;
-				const code = extractCode(url);
-				if (!code) return false;
-				done(() => resolve(code));
-				return true;
-			};
+				let settled = false;
+				const done = (fn: () => void): void => {
+					if (settled) return;
+					settled = true;
+					if (this.authTimeoutId !== null) {
+						window.clearTimeout(this.authTimeoutId);
+						this.authTimeoutId = null;
+					}
+					if (this.authWindow === win) this.authWindow = null;
+					try { win.removeAllListeners('closed'); win.close(); } catch { void 0; }
+					fn();
+				};
 
-			win.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
-				const matched = checkUrl(details.url);
-				callback({ cancel: matched });
-			});
-			win.webContents.on('will-redirect', (...args: unknown[]) => {
-				const [event, url] = args as [unknown, string];
-				if (checkUrl(url)) (event as { preventDefault: () => void }).preventDefault();
-			});
-			win.webContents.on('did-navigate', (...args: unknown[]) => {
-				const [, url] = args as [unknown, string];
-				checkUrl(url);
-			});
-			win.webContents.on('did-redirect-navigation', (...args: unknown[]) => {
-				const [, url] = args as [unknown, string];
-				checkUrl(url);
-			});
-			win.webContents.on('did-navigate-in-page', (...args: unknown[]) => {
-				const [, url] = args as [unknown, string];
-				checkUrl(url);
-			});
-			win.webContents.on('did-fail-load', (...args: unknown[]) => {
-				const [, errorCode, , url] = args as [unknown, number, string, string];
-				if (errorCode === -3 || url.includes('openid.oa2.authorization_code=')) checkUrl(url);
-			});
+				const checkUrl = (url: string): boolean => {
+					if (settled) return false;
+					if (!isRedirectUrl(url)) return false;
+					try {
+						const code = parseAuthorizationCode(url);
+						done(() => resolve(code));
+					} catch (err) {
+						done(() => reject(err instanceof Error ? err : new Error('Invalid authorization redirect')));
+					}
+					return true;
+				};
 
-			win.on('closed', () => {
-				if (!settled) { settled = true; reject(new Error('Authentication window closed')); }
-			});
+				win.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+					const matched = checkUrl(details.url);
+					callback({ cancel: matched });
+				});
+				win.webContents.on('will-redirect', (...args: unknown[]) => {
+					const [event, url] = args as [unknown, string];
+					if (checkUrl(url)) (event as { preventDefault: () => void }).preventDefault();
+				});
+				win.webContents.on('did-navigate', (...args: unknown[]) => {
+					const [, url] = args as [unknown, string];
+					checkUrl(url);
+				});
+				win.webContents.on('did-redirect-navigation', (...args: unknown[]) => {
+					const [, url] = args as [unknown, string];
+					checkUrl(url);
+				});
+				win.webContents.on('did-navigate-in-page', (...args: unknown[]) => {
+					const [, url] = args as [unknown, string];
+					checkUrl(url);
+				});
+				win.webContents.on('did-fail-load', (...args: unknown[]) => {
+					const [, errorCode, , url] = args as [unknown, number, string, string];
+					if (errorCode === -3 && isRedirectUrl(url)) checkUrl(url);
+				});
 
-			void win.webContents.loadURL(authUrl).catch((err: unknown) => {
-				const msg = err instanceof Error ? err.message : String(err);
-				if (/ERR_ABORTED/.test(msg)) return;
-				if (!settled) { settled = true; reject(new Error(`Failed to load auth URL: ${msg}`)); }
-			});
+				win.on('closed', () => {
+					if (this.authTimeoutId !== null) {
+						window.clearTimeout(this.authTimeoutId);
+						this.authTimeoutId = null;
+					}
+					if (this.authWindow === win) this.authWindow = null;
+					if (!settled) { settled = true; reject(new Error('Authentication window closed')); }
+				});
 
-			window.setTimeout(() => {
-				if (!settled) done(() => reject(new Error('OAuth flow timed out after 5 minutes')));
-			}, 5 * 60 * 1000);
-		});
+				void win.webContents.loadURL(authUrl).catch((err: unknown) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					if (/ERR_ABORTED/.test(msg)) return;
+					done(() => reject(new Error(`Failed to load auth URL: ${msg}`)));
+				});
+
+				this.authTimeoutId = window.setTimeout(() => {
+					if (!settled) done(() => reject(new Error('OAuth flow timed out after 5 minutes')));
+				}, 5 * 60 * 1000);
+			});
+		} catch (err) {
+			this.authInProgress = false;
+			const msg = err instanceof Error ? err.message : 'Authentication was cancelled';
+			new Notice('Authentication cancelled: ' + msg);
+			return;
+		}
 
 		let creds: StkCredentials;
 		try {
 			creds = await registerDevice(authCode, pkce.verifier);
 			this.storeCredentials(creds);
 		} catch (err) {
+			this.authInProgress = false;
 			new Notice('Authentication failed during device registration: ' + (err as Error).message);
 			console.error('STK registerDevice failed', err);
 			return;
@@ -304,12 +358,13 @@ export default class KindleStkPlugin extends Plugin {
 			new Notice('Authentication succeeded, but listing devices failed: ' + (err as Error).message);
 			console.error('STK listOwnedDevices failed', err);
 		}
+		this.authInProgress = false;
 	}
 
 	private async sendToKindle(file: TFile): Promise<void> {
 		const creds = this.getCredentials();
 		if (!creds) {
-			new Notice('Not authenticated. Run "authenticate with amazon" first.');
+			new Notice('Not authenticated. Run "authenticate with Amazon" first.');
 			return;
 		}
 
@@ -317,7 +372,7 @@ export default class KindleStkPlugin extends Plugin {
 		try {
 			devices = await listOwnedDevices(creds);
 		} catch (err) {
-			new Notice('Failed to list kindle devices: ' + (err as Error).message);
+			new Notice('Failed to list Kindle devices: ' + (err as Error).message);
 			return;
 		}
 
@@ -327,8 +382,6 @@ export default class KindleStkPlugin extends Plugin {
 			return;
 		}
 
-		const tempPath = nodePath.join(nodeOs.tmpdir(), `obsidian-kindle-${Date.now()}.epub`);
-
 		try {
 			new Notice('Preparing note...');
 			const note = await extractNote(this.app, file);
@@ -336,25 +389,25 @@ export default class KindleStkPlugin extends Plugin {
 				title: note.title,
 				author: this.settings.defaultAuthor,
 			});
-			nodeFs.writeFileSync(tempPath, Buffer.from(epub));
+			const tempFile = createTempEpubFile(Buffer.from(epub));
 
-			new Notice('Sending to kindle...');
-			await sendToKindle(creds, {
-				filePath: tempPath,
-				title: note.title,
-				author: this.settings.defaultAuthor,
-				format: 'EPUB',
-				targetSerials,
-			});
+			try {
+				new Notice('Sending to Kindle...');
+				await sendToKindle(creds, {
+					filePath: tempFile.path,
+					title: note.title,
+					author: this.settings.defaultAuthor,
+					format: 'EPUB',
+					targetSerials,
+				});
 
-			new Notice(`"${note.title}" sent to Kindle.`);
+				new Notice(`"${note.title}" sent to Kindle.`);
+			} finally {
+				tempFile.cleanup();
+			}
 		} catch (err) {
 			new Notice('Failed to send: ' + (err as Error).message);
 			console.error('STK send failed', err);
-		} finally {
-			try {
-				nodeFs.unlinkSync(tempPath);
-			} catch { void 0; }
 		}
 	}
 

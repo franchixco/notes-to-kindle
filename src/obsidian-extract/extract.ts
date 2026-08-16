@@ -10,6 +10,11 @@ type Embed = { path: string; kind: 'image' | 'note' };
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp']);
 
+// At most this many nested note contents are expanded (README documents
+// depth 3): the root note is depth 0, so `depth >= MAX_EMBED_DEPTH` stops
+// before the fourth nested level is read or recorded.
+const MAX_EMBED_DEPTH = 3;
+
 function stripFrontmatter(md: string): string {
 	return md.replace(/^---\n[\s\S]*?\n---\n*/, '');
 }
@@ -28,7 +33,7 @@ async function resolveNoteEmbeds(
 	sourcePath: string,
 	depth = 0,
 ): Promise<string> {
-	if (depth > 3) return md;
+	if (depth >= MAX_EMBED_DEPTH) return md;
 
 	const pattern = /!\[\[([^\]]+)\]\]/g;
 	const matches = [...md.matchAll(pattern)];

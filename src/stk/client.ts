@@ -3,6 +3,10 @@ import type { RequestUrlResponse } from 'obsidian';
 
 import type { PkcePair } from './oauth';
 import { signRequest, isoUtcNow } from './signer';
+import type { StkCredentials } from './credentials';
+export type { StkCredentials } from './credentials';
+import { validateUploadUrl } from './upload';
+import { STK_USER_AGENT } from './user-agent';
 
 import type crypto from 'crypto';
 import type fs from 'fs';
@@ -20,22 +24,14 @@ const CLIENT_ID =
 	'658490dfb190e494030082836775981fa23be0c2425441860352ba0f55915b43002d';
 const DEVICE_TYPE = 'A1K6D1WRW0MALS';
 
+// The protocol-required `ShellExtension` identity is preserved in the signed
+// request body (ClientInfo); the User-Agent header is transparent instead.
 const DEFAULT_CLIENT_INFO = {
 	appName: 'ShellExtension',
 	appVersion: '1.1.1.253',
 	os: 'MacOSX_10.14.6_x64',
 	osArchitecture: 'x64',
 };
-
-export interface StkCredentials {
-	devicePrivateKeyPem: string;
-	adpToken: string;
-	userDirectedId: string;
-	deviceSerialNumber: string;
-	deviceType: string;
-	accountName: string | null;
-	registeredDeviceName: string | null;
-}
 
 export interface OwnedDevice {
 	serialNumber: string;
@@ -65,7 +61,7 @@ interface GetUploadUrlResponse {
 
 function uploadFileToPresignedUrl(url: string, fileBuffer: Buffer): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const target = new URL(url);
+		const target = validateUploadUrl(url);
 		const req = nodeHttps.request(
 			{
 				protocol: target.protocol,
@@ -77,7 +73,7 @@ function uploadFileToPresignedUrl(url: string, fileBuffer: Buffer): Promise<void
 					'Content-Length': String(fileBuffer.length),
 					'Accept-Encoding': 'gzip, deflate',
 					'Accept-Language': 'en-US,*',
-					'User-Agent': 'Mozilla/5.0',
+					'User-Agent': STK_USER_AGENT,
 				},
 			},
 			(res) => {
@@ -205,7 +201,7 @@ async function exchangeCodeForAccessToken(
 				'Content-Type': 'application/json',
 				'Accept-Language': 'en-US',
 				'x-amzn-identity-auth-domain': 'api.amazon.com',
-				'User-Agent': 'Mozilla/5.0',
+				'User-Agent': STK_USER_AGENT,
 			},
 			body: JSON.stringify(body),
 			throw: false,
@@ -235,7 +231,7 @@ async function registerDeviceWithToken(
 				'Content-Type': 'text/xml',
 				Expect: '',
 				'Accept-Language': 'en-US,*',
-				'User-Agent': 'Mozilla/5.0',
+				'User-Agent': STK_USER_AGENT,
 			},
 			body: xmlBody,
 			throw: false,
@@ -296,7 +292,7 @@ async function signedPost<T>(
 			Accept: 'application/json',
 			'Accept-Encoding': 'gzip, deflate',
 			'Accept-Language': 'en-US,*',
-			'User-Agent': 'Mozilla/5.0',
+			'User-Agent': STK_USER_AGENT,
 		},
 		body: bodyJson,
 		throw: false,

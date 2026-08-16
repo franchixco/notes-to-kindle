@@ -48,6 +48,9 @@ jobs:
             - name: Build
               run: bun run build
 
+            - name: Verify generated bundle policy
+              run: bun run check:bundle
+
             - name: Verify tag and release metadata
               env:
                   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -98,7 +101,7 @@ jobs:
                   set -euo pipefail
                   rm -rf release-assets
                   mkdir -p release-assets
-                  for asset in main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md; do
+                  for asset in main.js manifest.json; do
                       if [ ! -s "$asset" ]; then
                           echo "error: mandatory release asset '$asset' is missing or empty" >&2
                           exit 1
@@ -143,7 +146,7 @@ jobs:
             - name: Verify downloaded assets
               run: |
                   set -euo pipefail
-                  for asset in main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md; do
+                  for asset in main.js manifest.json; do
                       if [ ! -s "dist/$asset" ]; then
                           echo "error: downloaded release asset 'dist/$asset' is missing or empty" >&2
                           exit 1
@@ -163,7 +166,7 @@ jobs:
               run: |
                   set -euo pipefail
                   tag="$RELEASE_TAG"
-                  assets=(main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md)
+                  assets=(main.js manifest.json)
                   if [ -s dist/styles.css ]; then
                       assets+=(styles.css)
                   fi

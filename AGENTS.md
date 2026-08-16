@@ -1,36 +1,47 @@
-# Obsidian community plugin
+# Notes to Kindle — Obsidian community plugin
 
 ## Project overview
 
+- Display name: **Notes to Kindle**. Plugin id and install folder: **`send-to-kindle`**. Repo: `https://github.com/franchixco/send-to-kindle`.
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
-- What it does: sends Obsidian notes to Kindle as EPUB via Amazon's Send to Kindle API. 100% local, no server, no SMTP.
+- What it does: sends Obsidian notes to Kindle as EPUB by talking directly to Amazon's **undocumented/internal Send to Kindle endpoints** (`api.amazon.com`, `firs-ta-g7g.amazon.com`, `stkservice.amazon.com`). This is an **unofficial** integration: not created, sponsored, approved, or endorsed by Amazon; Kindle and Send to Kindle are Amazon marks. There is no public Send to Kindle API. The plugin registers a synthetic device, may stop working without notice, and may carry account/terms risk. Never claim otherwise in docs or copy.
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
-- Required release artifacts: `main.js`, `manifest.json`, and optional `styles.css`.
-- `isDesktopOnly: true` — requires Node APIs (`crypto`, `http`) not available on Obsidian mobile.
+- Required release artifacts: `main.js`, `manifest.json`, `styles.css` (empty file), and the docs `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`.
+- `isDesktopOnly: true` — requires Node APIs (`crypto`) and Electron (sandboxed BrowserWindow for OAuth) not available on Obsidian mobile.
+- Privacy posture: no developer server, no telemetry, no analytics. Credentials live in OS keychain via `app.secretStorage`. Each authentication and each send is user initiated; the user accepts the unofficial integration risk (disclosed in README).
 
 ## Architecture
 
 ```
 src/
-  main.ts                     Plugin entry: lifecycle, commands, glue
+  main.ts                     Plugin entry: lifecycle, commands, glue, OAuth window
   settings.ts                 Settings tab + interface
   stk/
     client.ts                 Amazon STK API client (registerDevice, listOwnedDevices, sendToKindle)
+    credentials.ts            SecretStorage-backed credential handling (RSA key, tokens)
+    oauth.ts                  OAuth2 PKCE flow (isolated sandboxed Electron BrowserWindow)
+    redirect.ts               Strict OAuth redirect validation (scheme/host/path)
     signer.ts                 RSA PKCS#1 v1.5 request signing (Node crypto)
-    oauth.ts                  OAuth2 PKCE flow (local http server + window.open)
+    upload.ts                 Presigned upload URL validation (HTTPS, amazon.com/amazonaws.com only)
+    user-agent.ts             Client identifier handling
   obsidian-extract/
-    extract.ts                Resolves embeds, wikilinks, callouts → clean markdown
+    extract.ts                Resolves embeds (up to depth 3), wikilinks, callouts → clean markdown
   epub/
     builder.ts                Markdown → EPUB (in-memory ArrayBuffer)
+    render.ts                 Hardened Markdown → XHTML (escapes raw HTML, safe link schemes)
+    temp.ts                   Secure temp dir/file (0700/0600) for the EPUB during upload
 ```
 
 Credentials (RSA private key, Amazon tokens) are stored via `app.secretStorage` (OS keychain, requires API 1.11.4+). Non-sensitive settings via `loadData()`/`saveData()` as usual.
 
+### OAuth architecture (important)
+
+Authentication opens an **isolated sandboxed Electron `BrowserWindow`** (via `window.require('electron').remote` fallback to the app window's `remote`): `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, with a per-flow ephemeral `partition`. It does **not** use the system browser and does **not** use a local HTTP callback. The redirect is captured and strictly validated against the exact expected URL (`https://www.amazon.com/gp/sendtokindle`) in `src/stk/redirect.ts`. Keep this architecture; do not switch to a localhost loopback listener.
+
 ## Environment & tooling
 
-- Node.js: use current LTS (Node 18+ recommended).
-- **Package manager: bun** (global rule). Use `bun install`, `bun run <script>`.
-- **Bundler: esbuild** (configured in `esbuild.config.mjs`).
+- **Package manager: bun** (global rule). Use `bun install`, `bun run <script>`. Never use npm/yarn/pnpm commands.
+- **Bundler: esbuild** (configured in `esbuild.config.mjs`). The bundle banner names the repo URL and `legalComments: 'eof'` keeps dependency legal comments in `main.js`.
 - Types: `obsidian` type definitions.
 
 ### Install
@@ -77,21 +88,21 @@ bun run build
         constants.ts
       types.ts         # TypeScript interfaces and types
     ```
-- **Do not commit build artifacts**: Never commit `node_modules/`, `main.js`, or other generated files to version control.
+- **Do not commit build artifacts**: Never commit `node_modules/` or other generated files to version control. `main.js` is the exception: this plugin commits the built `main.js` because the release flow attaches it to GitHub releases. Keep it in sync with `src/` before tagging.
 - Keep the plugin small. Avoid large dependencies. Prefer browser-compatible packages.
 - Generated output should be placed at the plugin root or `dist/` depending on your build setup. Release artifacts must end up at the top level of the plugin folder in the vault (`main.js`, `manifest.json`, `styles.css`).
 
 ## Manifest rules (`manifest.json`)
 
 - Must include (non-exhaustive):
-    - `id` (plugin ID; for local dev it should match the folder name)
-    - `name`
+    - `id` (plugin ID; for local dev it should match the folder name — here `send-to-kindle`)
+    - `name` (here `Notes to Kindle`; keep the display name in sync with README and the plugin settings copy)
     - `version` (Semantic Versioning `x.y.z`)
     - `minAppVersion`
     - `description`
     - `isDesktopOnly` (boolean)
     - Optional: `author`, `authorUrl`, `fundingUrl` (string or map)
-- Never change `id` after release. Treat it as stable API.
+- Never change `id` after release. Treat it as stable API. If the repo is later renamed to `franchixco/send-to-kindle`, the id stays `send-to-kindle`.
 - Keep `minAppVersion` accurate when using newer APIs.
 - Canonical requirements are coded here: https://github.com/obsidianmd/obsidian-releases/blob/master/.github/workflows/validate-plugin-entry.yml
 
@@ -99,7 +110,7 @@ bun run build
 
 - Manual install for testing: copy `main.js`, `manifest.json`, `styles.css` (if any) to:
     ```
-    <Vault>/.obsidian/plugins/<plugin-id>/
+    <Vault>/.obsidian/plugins/send-to-kindle/
     ```
 - Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
@@ -129,6 +140,17 @@ Follow Obsidian's **Developer Policies** and **Plugin Guidelines**. In particula
 - Respect user privacy. Do not collect vault contents, filenames, or personal information unless absolutely necessary and explicitly consented.
 - Avoid deceptive patterns, ads, or spammy notifications.
 - Register and clean up all DOM, app, and interval listeners using the provided `register*` helpers so the plugin unloads safely.
+
+### Remote-service disclosure (this plugin)
+
+- This is an **unofficial** Amazon integration. Never claim Amazon authorized, approved, or endorsed it, and never imply the disclaimer removes risk.
+- There is **no public Send to Kindle API**. The plugin uses undocumented/internal Amazon STK endpoints and protocol identifiers compatible with the official desktop client, and registers a **synthetic device**.
+- Per send, the following leaves the machine: note title, configured author, the full note content (including expanded embedded-note text up to depth 3), and the generated EPUB.
+- Destinations: `api.amazon.com` (OAuth token exchange), `firs-ta-g7g.amazon.com` (device registration), `stkservice.amazon.com` (delivery request), and a validated HTTPS presigned upload host on `amazon.com`/`amazonaws.com` (exact host or subdomain, no userinfo/IP literal/non-default port; see `src/stk/upload.ts`).
+- What stays local: no developer server, no telemetry/analytics; credentials in OS keychain (`app.secretStorage`); temp EPUB in a `0700` dir with `0600` file, cleaned after upload (`src/epub/temp.ts`).
+- **Disconnect** in settings only blanks local credentials. Server-side revocation requires the user to remove the synthetic device in Amazon **Content & Devices**. Document this; do not claim Disconnect revokes Amazon-side access.
+- Capabilities (keep accurate): embedded Markdown notes expand up to depth 3; **image embeds and remote images are not included** (they render as alt text); raw HTML is escaped; only safe link schemes (`http:`, `https:`, `mailto:`) survive.
+- Keep README.md, LICENSE, and THIRD_PARTY_NOTICES.md accurate. `THIRD_PARTY_NOTICES.md` carries required notices (stkclient MIT © 2022 Max Johnson, marked, JSZip MIT option) and acknowledgements (stkclient-swift, obsidian-sample-plugin).
 
 ## UX & copy guidelines (for UI text, commands, settings)
 
@@ -272,11 +294,13 @@ this.registerInterval(
 
 ## Troubleshooting
 
-- Plugin doesn't load after build: ensure `main.js` and `manifest.json` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/<plugin-id>/`.
-- Build issues: if `main.js` is missing, run `npm run build` or `npm run dev` to compile your TypeScript source code.
+- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/send-to-kindle/`.
+- Build issues: if `main.js` is missing or stale, run `bun run build` (or `bun run dev` for watch) to compile the TypeScript source. Do not use npm.
 - Commands not appearing: verify `addCommand` runs after `onload` and IDs are unique.
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.
 - Mobile-only issues: confirm you're not using desktop-only APIs; check `isDesktopOnly` and adjust.
+- OAuth window won't open: the sandboxed BrowserWindow requires the Electron `remote` module; on newer Obsidian/Electron, `window.require('electron').remote` may be absent and the fallback path in `src/main.ts` is used. Do not fall back to a system browser or localhost HTTP callback.
+- `Disconnect` seems to do nothing about delivery: it only clears local credentials. Removing the synthetic device in Amazon Content & Devices is the server-side revocation step.
 
 ## References
 
@@ -285,5 +309,7 @@ this.registerInterval(
 - Developer policies: https://docs.obsidian.md/Developer+policies
 - Plugin guidelines: https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
 - Style guide: https://help.obsidian.md/style-guide
-- stkclient (Python reference impl we're porting): https://github.com/maxdjohnson/stkclient
+- stkclient (Python reference impl this TypeScript port adapts, MIT): https://github.com/maxdjohnson/stkclient
+- stkclient-swift (Swift reference consulted; MIT declared in README only): https://github.com/mrowlinson/stkclient-swift
 - Amazon STK endpoints: `stkservice.amazon.com`, `firs-ta-g7g.amazon.com`, `api.amazon.com`
+- Bundled deps: `marked` (MIT), `jszip` (MIT option of dual MIT/GPL-3.0-or-later). Notices live in `THIRD_PARTY_NOTICES.md`.

@@ -1,17 +1,12 @@
 import type { ExtractedNote } from '../obsidian-extract/extract';
 import type crypto from 'crypto';
-import { marked } from 'marked';
+import { renderBodyHtml } from './render';
 import JSZip from 'jszip';
 
 export interface EpubOptions {
 	title: string;
 	author: string;
 }
-
-marked.setOptions({
-	gfm: true,
-	breaks: false,
-});
 
 function escapeXml(s: string): string {
 	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -100,7 +95,7 @@ export async function buildEpub(note: ExtractedNote, opts: EpubOptions): Promise
 	const nodeCrypto = window.require('crypto') as typeof crypto;
 	const bookId = nodeCrypto.randomUUID();
 	const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-	const htmlBody = await marked.parse(note.bodyMarkdown);
+	const htmlBody = renderBodyHtml(note.bodyMarkdown);
 
 	const zip = new JSZip();
 	// EPUB spec: mimetype must be the first entry and stored uncompressed.

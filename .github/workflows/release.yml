@@ -5,20 +5,23 @@ on:
         tags:
             - '*'
 
+permissions:
+    contents: read
+
 jobs:
     build:
+        name: Build and verify release assets
         runs-on: ubuntu-latest
         permissions:
-            contents: write
-            id-token: write
-            attestations: write
+            contents: read
         timeout-minutes: 20
 
         steps:
-            - uses: actions/checkout@v6
+            - name: Checkout
+              uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
             - name: Use Bun
-              uses: oven-sh/setup-bun@v2
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
               with:
                   bun-version: 1.3.14
 
@@ -37,43 +40,121 @@ jobs:
             - name: Build
               run: bun run build
 
-            - name: Verify tag matches manifest version
+            - name: Verify tag and release metadata
+              env:
+                  GITHUB_REF: ${{ github.ref }}
               run: |
-                  tag="${GITHUB_REF#refs/tags/}"
-                  manifest_version="$(bun -e 'const m = await Bun.file("manifest.json").json(); process.stdout.write(m.version)')"
-                  if [ "$tag" != "$manifest_version" ]; then
-                      echo "error: git tag '$tag' does not match manifest.json version '$manifest_version'" >&2
-                      exit 1
-                  fi
-                  echo "Tag '$tag' matches manifest.json version '$manifest_version'."
+                  set -euo pipefail
+                  bun - <<'EOF'
+                  const tag = process.env.GITHUB_REF.replace(/^refs\/tags\//, "");
+                  const manifest = await Bun.file("manifest.json").json();
+                  const pkg = await Bun.file("package.json").json();
+                  const versions = await Bun.file("versions.json").json();
+                  const failures = [];
+                  if (tag !== manifest.version) {
+                      failures.push(`git tag "${tag}" does not match manifest.json version "${manifest.version}"`);
+                  }
+                  if (pkg.version !== manifest.version) {
+                      failures.push(`package.json version "${pkg.version}" does not match manifest.json version "${manifest.version}"`);
+                  }
+                  if (!Object.prototype.hasOwnProperty.call(versions, manifest.version)) {
+                      failures.push(`versions.json has no entry for version "${manifest.version}"`);
+                  } else if (versions[manifest.version] !== manifest.minAppVersion) {
+                      failures.push(`versions.json["${manifest.version}"] is "${versions[manifest.version]}", expected minAppVersion "${manifest.minAppVersion}"`);
+                  }
+                  if (manifest.id !== "send-to-kindle") {
+                      failures.push(`manifest.json id is "${manifest.id}", expected "send-to-kindle"`);
+                  }
+                  if (failures.length > 0) {
+                      for (const failure of failures) {
+                          console.error(`error: ${failure}`);
+                      }
+                      process.exit(1);
+                  }
+                  console.log(`Verified release metadata for tag ${tag} (${manifest.name} v${manifest.version}, minAppVersion ${manifest.minAppVersion}).`);
+                  EOF
 
-            - name: Check for optional non-empty styles
-              id: styles
+            - name: Prepare release assets
               run: |
+                  set -euo pipefail
+                  rm -rf release-assets
+                  mkdir -p release-assets
+                  for asset in main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md; do
+                      if [ ! -s "$asset" ]; then
+                          echo "error: mandatory release asset '$asset' is missing or empty" >&2
+                          exit 1
+                      fi
+                      cp "$asset" "release-assets/$asset"
+                  done
                   if [ -s styles.css ]; then
-                      echo "exists=true" >> "$GITHUB_OUTPUT"
+                      cp styles.css release-assets/styles.css
+                      echo "Included optional styles.css in release-assets."
                   else
-                      echo "exists=false" >> "$GITHUB_OUTPUT"
+                      echo "styles.css is absent or empty; skipping optional asset."
                   fi
+                  echo "Release assets staged:"
+                  ls -l release-assets
+
+            - name: Upload release assets
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: release-assets
+                  path: release-assets
+                  if-no-files-found: error
+                  compression-level: 0
+
+    publish:
+        name: Attest and create draft release
+        runs-on: ubuntu-latest
+        needs: build
+        permissions:
+            contents: write
+            id-token: write
+            attestations: write
+            actions: read
+        timeout-minutes: 15
+
+        steps:
+            - name: Download release assets
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+              with:
+                  name: release-assets
+                  path: dist
+
+            - name: Verify downloaded assets
+              run: |
+                  set -euo pipefail
+                  for asset in main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md; do
+                      if [ ! -s "dist/$asset" ]; then
+                          echo "error: downloaded release asset 'dist/$asset' is missing or empty" >&2
+                          exit 1
+                      fi
+                  done
+                  echo "All mandatory release assets are present and non-empty in dist/."
 
             - name: Attest build provenance
-              uses: actions/attest@v4
+              uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
               with:
-                  subject-path: |
-                      main.js
-                      manifest.json
-                      LICENSE
-                      THIRD_PARTY_NOTICES.md
-                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+                  subject-path: dist/*
 
-            - name: Create release
+            - name: Create draft release
               env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_TOKEN: ${{ github.token }}
               run: |
+                  set -euo pipefail
                   tag="${GITHUB_REF#refs/tags/}"
-
+                  assets=(main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md)
+                  if [ -s dist/styles.css ]; then
+                      assets+=(styles.css)
+                  fi
+                  asset_paths=()
+                  for asset in "${assets[@]}"; do
+                      asset_paths+=("dist/$asset")
+                  done
                   gh release create "$tag" \
-                    --title="$tag" \
-                    --draft \
-                    main.js manifest.json LICENSE THIRD_PARTY_NOTICES.md \
-                    ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+                      --repo "$GITHUB_REPOSITORY" \
+                      --title="$tag" \
+                      --generate-notes \
+                      --draft \
+                      "${asset_paths[@]}"
+                  echo "Created draft release '$tag' with ${#asset_paths[@]} asset(s)."

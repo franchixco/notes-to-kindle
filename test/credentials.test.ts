@@ -165,3 +165,31 @@ describe('disconnectCredentials', () => {
 		expect(readCredentials(store)).toBeNull();
 	});
 });
+
+describe('historical SecretStorage key compatibility', () => {
+	it('preserves the exact send-to-kindle credential keys across the rename', () => {
+		expect(CREDENTIALS_KEY).toBe('send-to-kindle-credentials');
+		expect(LEGACY_CREDENTIALS_KEY).toBe('stk-credentials');
+	});
+
+	it('loads credentials written under the old send-to-kindle key without reauthentication', () => {
+		const store = fakeStore({ [CREDENTIALS_KEY]: JSON.stringify(validCreds()) });
+		expect(readCredentials(store)).toEqual(validCreds());
+	});
+
+	it('loads credentials written under the legacy stk-credentials key via migration', () => {
+		const store = fakeStore({ [LEGACY_CREDENTIALS_KEY]: JSON.stringify(validCreds()) });
+		expect(migrateLegacyCredentials(store)).toBe(true);
+		expect(readCredentials(store)).toEqual(validCreds());
+	});
+
+	it('disconnect clears both the current and legacy keys', () => {
+		const store = fakeStore({
+			[CREDENTIALS_KEY]: JSON.stringify(validCreds()),
+			[LEGACY_CREDENTIALS_KEY]: JSON.stringify(validCreds()),
+		});
+		disconnectCredentials(store);
+		expect(store.getSecret(CREDENTIALS_KEY)).toBe('');
+		expect(store.getSecret(LEGACY_CREDENTIALS_KEY)).toBe('');
+	});
+});

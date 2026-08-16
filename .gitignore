@@ -31,6 +31,8 @@ data.json
 *.pfx
 *secret*
 *credential*
+!src/stk/credentials.ts
+!test/credentials.test.ts
 *token*.json
 *aws*
 

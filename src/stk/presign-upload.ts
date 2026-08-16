@@ -36,12 +36,30 @@ export interface UploadClientRequest {
 
 export type UploadRequestFactory = (options: UploadRequestOptions) => UploadClientRequest;
 
+/**
+ * Injectable timer surface so tests can drive the total upload deadline
+ * without real timers. The default implementation delegates to
+ * `window.setTimeout` / `window.clearTimeout`.
+ */
+export interface UploadTimer {
+	setTimeout(callback: () => void, ms: number): unknown;
+	clearTimeout(handle: unknown): void;
+}
+
+const defaultTimer: UploadTimer = {
+	setTimeout: (callback, ms) => window.setTimeout(callback, ms),
+	clearTimeout: (handle) => window.clearTimeout(handle as number),
+};
+
 export interface UploadToPresignedUrlOptions {
 	timeoutMs?: number;
 	maxErrorBodyBytes?: number;
+	deadlineMs?: number;
+	timer?: UploadTimer;
 }
 
 export const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+export const UPLOAD_DEADLINE_MS = 30 * 60 * 1000;
 export const UPLOAD_MAX_ERROR_BODY_BYTES = 16 * 1024;
 
 export class UploadRequestError extends Error {
@@ -57,10 +75,11 @@ export class UploadRequestError extends Error {
  * Any 2xx status is success. Errors are sanitized: they carry only the
  * operation and, when known, the HTTP status — never the remote response
  * body. The response body is still fully consumed (drained) so the socket is
- * released, but at most `maxErrorBodyBytes` are retained in memory. A request
- * inactivity timeout, transport errors, response errors and aborts all settle
- * the promise exactly once. Redirects are never followed: a 3xx is a
- * non-2xx failure.
+ * released, but at most `maxErrorBodyBytes` are retained in memory. The
+ * promise settles exactly once on the first of: a request inactivity timeout,
+ * the strict wall-clock deadline (`deadlineMs`, default 30 minutes), transport
+ * errors, response errors or aborts. The deadline timer is cleared on every
+ * settle. Redirects are never followed: a 3xx is a non-2xx failure.
  */
 export function uploadToPresignedUrl(
 	url: URL,
@@ -69,13 +88,17 @@ export function uploadToPresignedUrl(
 	options?: UploadToPresignedUrlOptions,
 ): Promise<void> {
 	const timeoutMs = options?.timeoutMs ?? UPLOAD_TIMEOUT_MS;
+	const deadlineMs = options?.deadlineMs ?? UPLOAD_DEADLINE_MS;
+	const timer = options?.timer ?? defaultTimer;
 	const maxErrorBodyBytes = options?.maxErrorBodyBytes ?? UPLOAD_MAX_ERROR_BODY_BYTES;
 
 	return new Promise<void>((resolve, reject) => {
 		let settled = false;
+		let deadlineHandle: unknown = null;
 		const settle = (fn: () => void): void => {
 			if (settled) return;
 			settled = true;
+			if (deadlineHandle !== null) timer.clearTimeout(deadlineHandle);
 			fn();
 		};
 		const fail = (message: string): void => {
@@ -108,6 +131,17 @@ export function uploadToPresignedUrl(
 			fail('Upload failed: request error');
 			return;
 		}
+
+		deadlineHandle = timer.setTimeout(() => {
+			// Settle as the deadline first so a synchronous destroy() (or an
+			// error it emits synchronously) cannot win the race.
+			settle(() => reject(new UploadRequestError('Upload failed: deadline exceeded')));
+			try {
+				req.destroy();
+			} catch {
+				// The socket may already be gone; the settled failure is enough.
+			}
+		}, deadlineMs);
 
 		req.on('error', () => {
 			fail('Upload failed: request error');

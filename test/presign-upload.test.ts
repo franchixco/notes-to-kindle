@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import {
 	UploadRequestError,
+	UPLOAD_DEADLINE_MS,
 	UPLOAD_MAX_ERROR_BODY_BYTES,
 	UPLOAD_TIMEOUT_MS,
 	uploadToPresignedUrl,
@@ -9,6 +10,7 @@ import {
 	type UploadIncomingMessage,
 	type UploadRequestFactory,
 	type UploadRequestOptions,
+	type UploadTimer,
 	type UploadToPresignedUrlOptions,
 } from '../src/stk/presign-upload';
 
@@ -96,6 +98,44 @@ class ThrowingEndRequest extends FakeRequest {
 	}
 }
 
+class FakeTimer implements UploadTimer {
+	private handles = new Map<number, { callback: () => void; ms: number }>();
+	private nextId = 1;
+	cleared: unknown[] = [];
+
+	setTimeout(callback: () => void, ms: number): unknown {
+		const id = this.nextId;
+		this.nextId += 1;
+		this.handles.set(id, { callback, ms });
+		return id;
+	}
+
+	clearTimeout(handle: unknown): void {
+		this.cleared.push(handle);
+		this.handles.delete(handle as number);
+	}
+
+	deadline(): { id: number; ms: number } | null {
+		if (this.handles.size === 0) return null;
+		const id = this.handles.keys().next().value as number;
+		const entry = this.handles.get(id);
+		if (!entry) return null;
+		return { id, ms: entry.ms };
+	}
+
+	fireDeadline(): void {
+		const current = this.deadline();
+		if (current === null) throw new Error('no pending deadline timer');
+		const entry = this.handles.get(current.id);
+		this.handles.delete(current.id);
+		entry?.callback();
+	}
+
+	pendingCount(): number {
+		return this.handles.size;
+	}
+}
+
 function makeHarness(
 	options?: UploadToPresignedUrlOptions,
 	requestCtor: new (opts: UploadRequestOptions) => FakeRequest = FakeRequest,
@@ -103,8 +143,10 @@ function makeHarness(
 	request: FakeRequest;
 	promise: Promise<void>;
 	url: URL;
+	timer: FakeTimer;
 } {
 	let captured: FakeRequest | null = null;
+	const timer = new FakeTimer();
 	const factory: UploadRequestFactory = (opts) => {
 		captured = new requestCtor(opts);
 		return captured;
@@ -112,9 +154,9 @@ function makeHarness(
 	const url = new URL(
 		'https://bucket.s3.amazonaws.com/some/key.epub?X-Amz-Signature=abc&part=1',
 	);
-	const promise = uploadToPresignedUrl(url, TEST_PAYLOAD, factory, options);
+	const promise = uploadToPresignedUrl(url, TEST_PAYLOAD, factory, { ...options, timer });
 	if (captured === null) throw new Error('request factory was not invoked');
-	return { request: captured, promise, url };
+	return { request: captured, promise, url, timer };
 }
 
 async function rejectionOf(promise: Promise<void>): Promise<unknown> {
@@ -302,5 +344,54 @@ describe('uploadToPresignedUrl', () => {
 		request.emit('timeout');
 		expect(request.destroyed).toBe(true);
 		await expectRejectsWith(promise, 'Upload failed: request timed out');
+	});
+
+	it('uses a 30-minute default wall-clock deadline in addition to the inactivity timeout', async () => {
+		expect(UPLOAD_DEADLINE_MS).toBe(30 * 60 * 1000);
+		const { request, timer } = makeHarness();
+		expect(request.timeoutMs).toBe(UPLOAD_TIMEOUT_MS);
+		expect(timer.pendingCount()).toBe(1);
+		expect(timer.deadline()?.ms).toBe(UPLOAD_DEADLINE_MS);
+	});
+
+	it('settles with the fixed deadline message and destroys the request', async () => {
+		const { request, promise, timer } = makeHarness({ deadlineMs: 1000 });
+		expect(timer.deadline()?.ms).toBe(1000);
+		timer.fireDeadline();
+		expect(request.destroyed).toBe(true);
+		await expectRejectsWith(promise, 'Upload failed: deadline exceeded');
+	});
+
+	it('clears the deadline timer on success', async () => {
+		const { request, promise, timer } = makeHarness();
+		const deadline = timer.deadline();
+		const res = new FakeResponse(200);
+		request.emit('response', res);
+		res.finish();
+		await promise;
+		expect(timer.pendingCount()).toBe(0);
+		expect(timer.cleared).toContain(deadline?.id);
+	});
+
+	it('clears the deadline timer when the inactivity timeout settles first', async () => {
+		const { request, promise, timer } = makeHarness({ timeoutMs: 1000 });
+		request.emit('timeout');
+		await expectRejectsWith(promise, 'Upload failed: request timed out');
+		expect(timer.pendingCount()).toBe(0);
+		expect(request.destroyed).toBe(true);
+	});
+
+	it('keeps the fixed deadline message even when destroy emits a synchronous error', async () => {
+		const { request, promise, timer } = makeHarness(undefined, DestroyEmitsErrorRequest);
+		timer.fireDeadline();
+		expect(request.destroyed).toBe(true);
+		await expectRejectsWith(promise, 'Upload failed: deadline exceeded');
+	});
+
+	it('keeps the inactivity timeout independent of the deadline', async () => {
+		const { request, promise, timer } = makeHarness({ timeoutMs: 1000, deadlineMs: 99999 });
+		request.emit('timeout');
+		await expectRejectsWith(promise, 'Upload failed: request timed out');
+		expect(timer.pendingCount()).toBe(0);
 	});
 });

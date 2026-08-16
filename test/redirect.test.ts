@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
 	InvalidRedirectError,
+	isAllowedOAuthNavigation,
 	isRedirectUrl,
 	OAuthDeniedError,
 	parseAuthorizationCode,
@@ -130,5 +131,43 @@ describe('isRedirectUrl', () => {
 		expect(isRedirectUrl('https://user@www.amazon.com/gp/sendtokindle')).toBe(false);
 		expect(isRedirectUrl('not a url')).toBe(false);
 		expect(isRedirectUrl('')).toBe(false);
+	});
+});
+
+describe('isAllowedOAuthNavigation', () => {
+	it('allows HTTPS on the exact Amazon login hosts', () => {
+		expect(isAllowedOAuthNavigation('https://www.amazon.com/ap/signin?openid.mode=checkid_setup')).toBe(true);
+		expect(isAllowedOAuthNavigation('https://amazon.com/ap/signin')).toBe(true);
+	});
+
+	it('does not classify the final Send to Kindle redirect as external', () => {
+		expect(isAllowedOAuthNavigation(VALID_REDIRECT)).toBe(true);
+		expect(isAllowedOAuthNavigation('https://www.amazon.com/gp/sendtokindle')).toBe(true);
+		expect(isAllowedOAuthNavigation('https://amazon.com/gp/sendtokindle?openid.oa2.authorization_code=x')).toBe(true);
+	});
+
+	it('rejects non-HTTPS, lookalike and external hosts', () => {
+		const blocked = [
+			'http://www.amazon.com/ap/signin',
+			'ftp://www.amazon.com/ap/signin',
+			'https://amazon.com.evil.com/ap/signin',
+			'https://www.amazon.com.evil.com/gp/sendtokindle?openid.oa2.authorization_code=x',
+			'https://evilamazon.com/ap/signin',
+			'https://www.amazon.co.uk/ap/signin',
+			'https://www.amazonaws.com/ap/signin',
+			'https://www-amazon.com/ap/signin',
+			'https://www.google.com/',
+			'https://evil.com/?next=https://www.amazon.com/gp/sendtokindle',
+			'not a url',
+			'',
+		];
+		for (const url of blocked) {
+			expect(isAllowedOAuthNavigation(url), url).toBe(false);
+		}
+	});
+
+	it('rejects a non-default port or userinfo', () => {
+		expect(isAllowedOAuthNavigation('https://www.amazon.com:8443/ap/signin')).toBe(false);
+		expect(isAllowedOAuthNavigation('https://attacker@www.amazon.com/ap/signin')).toBe(false);
 	});
 });

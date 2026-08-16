@@ -11,6 +11,9 @@ const REDIRECT_SCHEME = 'https:';
 const REDIRECT_HOST = 'www.amazon.com';
 const REDIRECT_PATHNAME = '/gp/sendtokindle';
 
+// The only hosts the OAuth window may ever navigate to at the top level.
+const ALLOWED_NAVIGATION_HOSTS = new Set(['www.amazon.com', 'amazon.com']);
+
 export class InvalidRedirectError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -53,6 +56,32 @@ export function isRedirectUrl(raw: string): boolean {
 		&& url.port === ''
 		&& url.username === ''
 		&& url.password === ''
+	);
+}
+
+/**
+ * True only for HTTPS top-level navigations in the OAuth window that stay on
+ * the exact Amazon login hosts (`www.amazon.com` / `amazon.com`) with a
+ * default port and no userinfo. Anything else — external hosts, lookalike or
+ * suffix hosts, non-HTTPS schemes — must be rejected by the `will-navigate`
+ * handler. This is a navigation gate, not the redirect completion check; the
+ * final redirect is still validated by {@link isRedirectUrl} and
+ * {@link parseAuthorizationCode}.
+ */
+export function isAllowedOAuthNavigation(raw: string): boolean {
+	if (typeof raw !== 'string' || raw.length === 0) return false;
+	let url: URL;
+	try {
+		url = new URL(raw);
+	} catch {
+		return false;
+	}
+	return (
+		url.protocol === REDIRECT_SCHEME
+		&& url.port === ''
+		&& url.username === ''
+		&& url.password === ''
+		&& ALLOWED_NAVIGATION_HOSTS.has(url.hostname)
 	);
 }
 

@@ -1,8 +1,8 @@
 import type { ExtractedNote } from '../obsidian-extract/extract';
 import type crypto from 'crypto';
+import { strToU8, zipSync, type Zippable } from 'fflate';
 import { renderBodyHtml } from './render';
 import { sanitizeXmlText } from './xml';
-import JSZip from 'jszip';
 
 export interface EpubOptions {
 	title: string;
@@ -98,20 +98,16 @@ export async function buildEpub(note: ExtractedNote, opts: EpubOptions): Promise
 	const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 	const htmlBody = renderBodyHtml(note.bodyMarkdown);
 
-	const zip = new JSZip();
-	// EPUB spec: mimetype must be the first entry and stored uncompressed.
-	zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
-	zip.file('META-INF/container.xml', buildContainerXml());
-	const oebps = zip.folder('OEBPS')!;
-	oebps.file('content.opf', buildOpf(opts.title, opts.author, bookId, modified));
-	oebps.file('nav.xhtml', buildNav(opts.title));
-	oebps.file('chapter1.xhtml', buildChapter(opts.title, htmlBody));
-	oebps.file('style.css', CSS);
-
-	return zip.generateAsync({
-		type: 'arraybuffer',
-		mimeType: 'application/epub+zip',
-		compression: 'DEFLATE',
-		compressionOptions: { level: 9 },
-	});
+	// Object insertion order keeps mimetype as the first local file header. EPUB
+	// additionally requires that entry to use STORE while the rest use DEFLATE.
+	const files: Zippable = {
+		mimetype: [strToU8('application/epub+zip'), { level: 0 }],
+		'META-INF/container.xml': strToU8(buildContainerXml()),
+		'OEBPS/content.opf': strToU8(buildOpf(opts.title, opts.author, bookId, modified)),
+		'OEBPS/nav.xhtml': strToU8(buildNav(opts.title)),
+		'OEBPS/chapter1.xhtml': strToU8(buildChapter(opts.title, htmlBody)),
+		'OEBPS/style.css': strToU8(CSS),
+	};
+	const archive = zipSync(files, { level: 9 });
+	return archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength);
 }

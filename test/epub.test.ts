@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { DOMParser } from '@xmldom/xmldom';
-import JSZip from 'jszip';
+import { strFromU8, unzipSync, type Unzipped } from 'fflate';
 import { buildEpub } from '../src/epub/builder';
 import { renderBodyHtml } from '../src/epub/render';
 import { isXml10CodePoint } from '../src/epub/xml';
@@ -12,10 +12,13 @@ function note(bodyMarkdown: string): ExtractedNote {
 
 async function chapterHtml(md: string): Promise<string> {
 	const epub = await buildEpub(note(md), { title: 'Note title', author: 'Obsidian' });
-	const zip = await JSZip.loadAsync(Buffer.from(epub));
-	const chapter = zip.file('OEBPS/chapter1.xhtml');
-	if (chapter === null) throw new Error('chapter1.xhtml missing from EPUB');
-	return await chapter.async('string');
+	return strFromU8(requiredEntry(unzipSync(new Uint8Array(epub)), 'OEBPS/chapter1.xhtml'));
+}
+
+function requiredEntry(zip: Unzipped, path: string): Uint8Array {
+	const entry = zip[path];
+	if (entry === undefined) throw new Error(`${path} missing from EPUB`);
+	return entry;
 }
 
 // Real XML well-formedness check through @xmldom/xmldom: any warning, error or
@@ -334,10 +337,10 @@ describe('buildEpub', () => {
 		const title = `Ti\u0001tle\uFFFE`;
 		const author = `Au\uD800thor\uFFFF`;
 		const epub = await buildEpub(note('Contenido'), { title, author });
-		const zip = await JSZip.loadAsync(Buffer.from(epub));
-		const opf = await zip.file('OEBPS/content.opf')!.async('string');
-		const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
-		const chapter = await zip.file('OEBPS/chapter1.xhtml')!.async('string');
+		const zip = unzipSync(new Uint8Array(epub));
+		const opf = strFromU8(requiredEntry(zip, 'OEBPS/content.opf'));
+		const nav = strFromU8(requiredEntry(zip, 'OEBPS/nav.xhtml'));
+		const chapter = strFromU8(requiredEntry(zip, 'OEBPS/chapter1.xhtml'));
 
 		for (const xml of [opf, nav, chapter]) {
 			assertNoForbiddenCodePoints(xml);
@@ -369,9 +372,9 @@ describe('buildEpub', () => {
 			title: 'Nota \u{1F4D6} \u{10000}',
 			author: 'Autor',
 		});
-		const zip = await JSZip.loadAsync(Buffer.from(epub));
-		const opf = await zip.file('OEBPS/content.opf')!.async('string');
-		const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
+		const zip = unzipSync(new Uint8Array(epub));
+		const opf = strFromU8(requiredEntry(zip, 'OEBPS/content.opf'));
+		const nav = strFromU8(requiredEntry(zip, 'OEBPS/nav.xhtml'));
 		expect(opf).toContain('Nota \u{1F4D6} \u{10000}');
 		expect(nav).toContain('Nota \u{1F4D6} \u{10000}');
 		assertNoForbiddenCodePoints(opf);
@@ -382,7 +385,7 @@ describe('buildEpub', () => {
 
 	it('produces a valid EPUB zip structure', async () => {
 		const epub = await buildEpub(note('Contenido normal'), { title: 'Mi nota', author: 'Yo' });
-		const zip = await JSZip.loadAsync(Buffer.from(epub));
+		const zip = unzipSync(new Uint8Array(epub));
 		for (const entry of [
 			'mimetype',
 			'META-INF/container.xml',
@@ -391,8 +394,18 @@ describe('buildEpub', () => {
 			'OEBPS/chapter1.xhtml',
 			'OEBPS/style.css',
 		]) {
-			expect(zip.file(entry), entry).not.toBeNull();
+			expect(zip[entry], entry).toBeDefined();
 		}
-		expect(await zip.file('mimetype')!.async('string')).toBe('application/epub+zip');
+		expect(strFromU8(requiredEntry(zip, 'mimetype'))).toBe('application/epub+zip');
+	});
+
+	it('stores mimetype uncompressed as the first local file entry', async () => {
+		const epub = await buildEpub(note('Contenido normal'), { title: 'Mi nota', author: 'Yo' });
+		const view = new DataView(epub);
+		expect(view.getUint32(0, true)).toBe(0x04034b50);
+		expect(view.getUint16(8, true)).toBe(0);
+		const nameLength = view.getUint16(26, true);
+		const name = strFromU8(new Uint8Array(epub, 30, nameLength));
+		expect(name).toBe('mimetype');
 	});
 });

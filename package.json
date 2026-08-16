@@ -9,6 +9,7 @@
 	"scripts": {
 		"dev": "bun esbuild.config.mjs",
 		"build": "bunx tsc -noEmit -skipLibCheck && bun esbuild.config.mjs production",
+		"check:bundle": "bun bundle-policy.mjs",
 		"version": "bun version-bump.mjs",
 		"lint": "bunx eslint .",
 		"test": "bun test",

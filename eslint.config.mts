@@ -24,7 +24,7 @@ export default defineConfig([
 			},
 			parserOptions: {
 				projectService: {
-					allowDefaultProject: ['eslint.config.mts', 'manifest.json', 'test/*.ts'],
+					allowDefaultProject: ['bundle-policy.mjs', 'eslint.config.mts', 'manifest.json', 'test/*.ts'],
 					// The test suite is small; the default-project cap must cover
 					// every test file so they still get type-aware linting.
 					maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 30,

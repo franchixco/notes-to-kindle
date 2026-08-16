@@ -1,6 +1,6 @@
 {
 	"name": "send-to-kindle",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Convert notes to EPUB locally and send them to Amazon Kindle using an unofficial desktop integration.",
 	"main": "main.js",
 	"type": "module",

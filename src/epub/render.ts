@@ -61,6 +61,13 @@ function renderAltText(this: Renderer, token: Tokens.Image): string {
 	return `<span class="stk-image">${escapeXml(alt)}</span>`;
 }
 
+function renderImage(this: Renderer, token: Tokens.Image, allowedImages: ReadonlySet<string>): string {
+	if (!allowedImages.has(token.href)) return renderAltText.call(this, token);
+	const alt = this.parser.parseInline(token.tokens, this.parser.textRenderer).trim();
+	const titleAttr = token.title ? ` title="${escapeXml(token.title)}"` : '';
+	return `<img class="stk-image" src="${escapeXml(token.href)}" alt="${escapeXml(alt)}"${titleAttr} />`;
+}
+
 function isSafeLinkHref(href: string): boolean {
 	const trimmed = href.trim();
 	if (trimmed.length === 0 || trimmed.startsWith('#')) return true;
@@ -116,20 +123,23 @@ const highlightExtension: TokenizerAndRendererExtension = {
 // marked only adopts the enumerable own properties of a renderer option, so
 // the hardened renderers are assigned onto a base Renderer instance instead
 // of subclassing it.
-const renderer = new Renderer();
-renderer.html = renderHtmlToken;
-renderer.br = (): string => '<br />';
-renderer.hr = (): string => '<hr />';
-renderer.image = renderAltText;
-renderer.checkbox = renderCheckbox;
-renderer.link = renderLink;
-
-const stkMarked = new Marked({
-	gfm: true,
-	breaks: false,
-	renderer,
-	extensions: [highlightExtension],
-});
+function createMarked(allowedImages: ReadonlySet<string>): Marked {
+	const renderer = new Renderer();
+	renderer.html = renderHtmlToken;
+	renderer.br = (): string => '<br />';
+	renderer.hr = (): string => '<hr />';
+	renderer.image = function image(token: Tokens.Image): string {
+		return renderImage.call(this, token, allowedImages);
+	};
+	renderer.checkbox = renderCheckbox;
+	renderer.link = renderLink;
+	return new Marked({
+		gfm: true,
+		breaks: false,
+		renderer,
+		extensions: [highlightExtension],
+	});
+}
 
 /**
  * Final guard over the generated fragment: only the XML predefined entities
@@ -154,6 +164,6 @@ function guardXmlEntities(html: string): string {
 	});
 }
 
-export function renderBodyHtml(markdown: string): string {
-	return sanitizeXmlText(guardXmlEntities(stkMarked.parse(markdown, { async: false })));
+export function renderBodyHtml(markdown: string, allowedImages: ReadonlySet<string> = new Set()): string {
+	return sanitizeXmlText(guardXmlEntities(createMarked(allowedImages).parse(markdown, { async: false })));
 }

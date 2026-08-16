@@ -1,13 +1,34 @@
 import { describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { DOMParser } from '@xmldom/xmldom';
 import { strFromU8, unzipSync, type Unzipped } from 'fflate';
 import { buildEpub } from '../src/epub/builder';
 import { renderBodyHtml } from '../src/epub/render';
 import { isXml10CodePoint } from '../src/epub/xml';
 import type { ExtractedNote } from '../src/obsidian-extract/extract';
+import type { EpubImageAsset } from '../src/images/types';
 
-function note(bodyMarkdown: string): ExtractedNote {
-	return { title: 'Note title', bodyMarkdown, embeds: [] };
+function note(bodyMarkdown: string, assets: EpubImageAsset[] = []): ExtractedNote {
+	return { title: 'Note title', bodyMarkdown, embeds: [], assets, warnings: [] };
+}
+
+function jpegAsset(): EpubImageAsset {
+	const data = new Uint8Array([
+		0xff, 0xd8,
+		0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x03, 0x00, 0x02, 0x01, 0x01, 0x11, 0x00,
+		0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
+		0x12, 0xff, 0x00, 0x34, 0xff, 0xd9,
+	]);
+	const hash = createHash('sha256').update(data).digest('hex');
+	return {
+		hash,
+		href: `images/${hash}.jpg`,
+		mediaType: 'image/jpeg',
+		data,
+		sourcePath: 'assets/photo.jpg',
+		width: 2,
+		height: 3,
+	};
 }
 
 async function chapterHtml(md: string): Promise<string> {
@@ -19,6 +40,18 @@ function requiredEntry(zip: Unzipped, path: string): Uint8Array {
 	const entry = zip[path];
 	if (entry === undefined) throw new Error(`${path} missing from EPUB`);
 	return entry;
+}
+
+async function expectRejectsWith(promise: Promise<ArrayBuffer>, message: string): Promise<void> {
+	let thrown: unknown;
+	try {
+		await promise;
+	} catch (error) {
+		thrown = error;
+	}
+	expect(thrown).toBeInstanceOf(Error);
+	if (!(thrown instanceof Error)) throw new Error('Expected an Error instance.');
+	expect(thrown.message).toContain(message);
 }
 
 // Real XML well-formedness check through @xmldom/xmldom: any warning, error or
@@ -211,6 +244,24 @@ describe('renderBodyHtml', () => {
 		expect(html).not.toContain('javascript:');
 	});
 
+	it('renders only an exactly allowlisted image href as XHTML', () => {
+		const asset = jpegAsset();
+		const html = renderBodyHtml(`![a < b & c](${asset.href} "title & more")`, new Set([asset.href]));
+		expect(html).toContain(`<img class="stk-image" src="${asset.href}"`);
+		expect(html).toContain('alt="a &lt; b &amp; c"');
+		expect(html).toContain('title="title &amp; more"');
+		expect(html).toContain('/>');
+		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
+	});
+
+	it('does not trust a hash-shaped image path without registry approval', () => {
+		const asset = jpegAsset();
+		const html = renderBodyHtml(`![forged](${asset.href})`);
+		expect(html).toContain('forged');
+		expect(html).not.toContain('<img');
+		expect(html).not.toContain(asset.href);
+	});
+
 	it('neutralizes javascript: links but keeps safe links', () => {
 		const js = renderBodyHtml('[x](javascript:alert(1))');
 		expect(js).not.toContain('href="javascript:');
@@ -289,6 +340,49 @@ describe('buildEpub', () => {
 		expect(html).toContain('diagrama');
 		expect(html).not.toContain('https://evil.example');
 		assertParsesAsXml(html);
+	});
+
+	it('packages an approved image in XHTML, OPF and ZIP exactly once', async () => {
+		const asset = jpegAsset();
+		const epub = await buildEpub(note(`![photo](${asset.href})`, [asset]), {
+			title: 'Image note',
+			author: 'Obsidian',
+		});
+		const zip = unzipSync(new Uint8Array(epub));
+		const imagePath = `OEBPS/${asset.href}`;
+		expect([...requiredEntry(zip, imagePath)]).toEqual([...asset.data]);
+		const opf = strFromU8(requiredEntry(zip, 'OEBPS/content.opf'));
+		const chapter = strFromU8(requiredEntry(zip, 'OEBPS/chapter1.xhtml'));
+		expect(opf.match(new RegExp(asset.href, 'g'))?.length).toBe(1);
+		expect(opf).toContain(`media-type="${asset.mediaType}"`);
+		expect(chapter).toContain(`<img class="stk-image" src="${asset.href}" alt="photo" />`);
+		assertParsesAsXml(opf);
+		assertParsesAsXml(chapter);
+	});
+
+	it('rejects forged asset paths and mutated bytes before packaging', async () => {
+		const forgedPath = jpegAsset();
+		forgedPath.href = `images/${forgedPath.hash}.png`;
+		await expectRejectsWith(
+			buildEpub(note('x', [forgedPath]), { title: 'x', author: 'x' }),
+			'Invalid EPUB image path',
+		);
+
+		const mutated = jpegAsset();
+		mutated.data = new Uint8Array(mutated.data);
+		mutated.data[5] = (mutated.data[5] ?? 0) ^ 1;
+		await expectRejectsWith(
+			buildEpub(note('x', [mutated]), { title: 'x', author: 'x' }),
+			'hash does not match',
+		);
+	});
+
+	it('reapplies the unique-image budget before building the ZIP', async () => {
+		const assets = Array.from({ length: 101 }, () => jpegAsset());
+		await expectRejectsWith(
+			buildEpub(note('x', assets), { title: 'x', author: 'x' }),
+			'100 image safety limit',
+		);
 	});
 
 	it('produces a fully parseable chapter for adversarial content', async () => {

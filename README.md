@@ -1,12 +1,12 @@
-# Notes to E-reader
+# Notes to Kindle
 
-Send your Obsidian notes to your e-reader as EPUB, straight from the Obsidian desktop app.
+Send your Obsidian notes to your Kindle as EPUB, straight from the Obsidian desktop app.
 
-> **Unofficial integration.** This app was not created or endorsed by Amazon. This plugin is not created, sponsored, approved, or endorsed by Amazon, and it is not affiliated with Amazon. **Kindle** and **Send to Kindle** are trademarks of Amazon.com, Inc. or its affiliates.
+> **Unofficial integration.** This plugin is not created, sponsored, approved, or endorsed by Amazon. **Kindle** and **Send to Kindle** are trademarks of Amazon.com, Inc. or its affiliates.
 
 ## What it does
 
-Notes to E-reader takes the current note, converts it to an EPUB, and delivers it to your Kindle over Wi-Fi as a personal document. It uses the note title and the default author configured in the plugin settings.
+Notes to Kindle takes the current note, converts it to an EPUB, and delivers it to your Kindle over Wi-Fi as a personal document. It uses the note title and the default author configured in the plugin settings.
 
 ## Important: how the send works
 
@@ -62,19 +62,8 @@ You stay in control. Authentication only happens when you click **Authenticate**
 
 ## Install
 
-1. Copy the release artifacts into `<Vault>/.obsidian/plugins/notes-to-ereader/`. Only `main.js` and `manifest.json` are required; `styles.css` is optional and is currently omitted.
-2. In Obsidian, open **Settings → Community plugins**, enable "Notes to E-reader", and allow third-party plugins if prompted.
-
-### Upgrading from 0.1.1 (technical ID rename)
-
-Version 0.1.2 changes the pre-community technical identity from `send-to-kindle` to `notes-to-ereader`: the plugin ID, package name, and install folder are renamed, and the display name is now **Notes to E-reader**. Your Amazon authentication is unaffected — credentials keep living under the same secure key (`send-to-kindle-credentials`), so you do not need to re-authenticate.
-
-Existing local installs of 0.1.1 must be migrated:
-
-1. Close Obsidian.
-2. Move the whole plugin folder from `<Vault>/.obsidian/plugins/send-to-kindle/` to `<Vault>/.obsidian/plugins/notes-to-ereader/`, keeping the existing `data.json`.
-3. Reopen Obsidian and enable the plugin. If Obsidian lists both IDs, remove the stale `send-to-kindle` folder.
-4. Re-apply any command hotkeys in **Settings → Hotkeys**. Obsidian namespaces hotkeys by plugin ID, and the rename changes that namespace, so the `send-note` and `authenticate-amazon` hotkeys must be re-assigned (the command IDs themselves are unchanged).
+1. Copy the release artifacts into `<Vault>/.obsidian/plugins/send-to-kindle/`. Only `main.js` and `manifest.json` are required; `styles.css` is optional and is currently omitted.
+2. In Obsidian, open **Settings → Community plugins**, enable "Notes to Kindle", and allow third-party plugins if prompted.
 
 For development:
 
@@ -86,7 +75,7 @@ bun run build    # production build
 
 ## Usage
 
-1. Open **Settings → Community plugins**, enable "Notes to E-reader".
+1. Open **Settings → Community plugins**, enable "Notes to Kindle".
 2. In the plugin settings, click **Authenticate**. An isolated, sandboxed Electron window opens for the Amazon login. The plugin does not open your system browser and does not use a local HTTP callback.
 3. Open any note and run the command **Send current note to Kindle**.
 

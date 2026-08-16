@@ -6,7 +6,7 @@
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
 - What it does: sends Obsidian notes to Kindle as EPUB by talking directly to Amazon's **undocumented/internal Send to Kindle endpoints** (`api.amazon.com`, `firs-ta-g7g.amazon.com`, `stkservice.amazon.com`). This is an **unofficial** integration: not created, sponsored, approved, or endorsed by Amazon; Kindle and Send to Kindle are Amazon marks. There is no public Send to Kindle API. The plugin registers a synthetic device, may stop working without notice, and may carry account/terms risk. Never claim otherwise in docs or copy.
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
-- Required Obsidian release artifacts: `main.js` and `manifest.json`; include `styles.css` only when non-empty. Releases also attach `LICENSE` and `THIRD_PARTY_NOTICES.md` for attribution.
+- Required Obsidian release artifacts: `main.js` and `manifest.json`; include `styles.css` only when non-empty. Keep `LICENSE` and `THIRD_PARTY_NOTICES.md` in the repository, but do not attach them because the Community directory reports unsupported release files.
 - `isDesktopOnly: true` — requires Node APIs (`crypto`) and Electron (sandboxed BrowserWindow for OAuth) not available on Obsidian mobile.
 - Privacy posture: no developer server, no telemetry, no analytics. Credentials live in OS keychain via `app.secretStorage`. Each authentication and each send is user initiated; the user accepts the unofficial integration risk (disclosed in README).
 
@@ -166,7 +166,7 @@ Follow Obsidian's **Developer Policies** and **Plugin Guidelines**. In particula
 - What stays local: no developer server, no telemetry/analytics; credentials in OS keychain (`app.secretStorage`); temp EPUB in a `0700` dir with `0600` file, cleaned after upload (`src/epub/temp.ts`).
 - **Disconnect** in settings only blanks local credentials. Server-side revocation requires the user to remove the synthetic device in Amazon **Content & Devices**. Document this; do not claim Disconnect revokes Amazon-side access.
 - Capabilities (keep accurate): embedded Markdown notes expand up to depth 3; **image embeds and remote images are not included** (they render as alt text); raw HTML is escaped; only safe link schemes (`http:`, `https:`, `mailto:`) survive.
-- Keep README.md, LICENSE, and THIRD_PARTY_NOTICES.md accurate. `THIRD_PARTY_NOTICES.md` carries required notices (stkclient MIT © 2022 Max Johnson, marked, JSZip MIT option) and acknowledgements (stkclient-swift, obsidian-sample-plugin).
+- Keep README.md, LICENSE, and THIRD_PARTY_NOTICES.md accurate. `THIRD_PARTY_NOTICES.md` carries required notices (stkclient MIT © 2022 Max Johnson, marked, fflate) and acknowledgements (stkclient-swift, obsidian-sample-plugin).
 
 ## UX & copy guidelines (for UI text, commands, settings)
 
@@ -328,4 +328,4 @@ this.registerInterval(
 - stkclient (Python reference impl this TypeScript port adapts, MIT): https://github.com/maxdjohnson/stkclient
 - stkclient-swift (Swift reference consulted; MIT declared in README only): https://github.com/mrowlinson/stkclient-swift
 - Amazon STK endpoints: `stkservice.amazon.com`, `firs-ta-g7g.amazon.com`, `api.amazon.com`
-- Bundled deps: `marked` (MIT), `jszip` (MIT option of dual MIT/GPL-3.0-or-later). Notices live in `THIRD_PARTY_NOTICES.md`.
+- Bundled deps: `marked` (MIT) and `fflate` (MIT). Notices live in `THIRD_PARTY_NOTICES.md`.

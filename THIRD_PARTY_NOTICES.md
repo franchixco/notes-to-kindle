@@ -63,14 +63,14 @@ SOFTWARE.
 
 Source: https://github.com/markedjs/marked (LICENSE file in the installed package)
 
-### JSZip (Stuk/jszip)
+### fflate (101arrowz/fflate)
 
-`JSZip` is bundled into `main.js` and used to produce the EPUB container. JSZip is dual licensed under MIT or GPL-3.0-or-later; this project uses the MIT option.
+`fflate` is bundled into `main.js` and used to produce the EPUB container.
 
 ```
-The MIT License
+MIT License
 
-Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+Copyright (c) 2026 Arjun Barrett
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -91,7 +91,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-Source: https://github.com/Stuk/jszip (LICENSE.markdown in the installed package)
+Source: https://github.com/101arrowz/fflate (LICENSE file in the installed package)
 
 ## Acknowledgements (not distributed)
 

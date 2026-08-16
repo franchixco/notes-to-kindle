@@ -17,6 +17,7 @@ import {
 	isRedirectUrl,
 	parseAuthorizationCode,
 } from './stk/redirect';
+import { wireOAuthNavigation } from './stk/navigation';
 import {
 	buildAmazonAuthUrl,
 	listOwnedDevices,
@@ -294,12 +295,12 @@ export default class KindleStkPlugin extends Plugin {
 	/**
 	 * Opens the sandboxed Electron window and resolves with the authorization
 	 * code only once the strictly validated Amazon redirect is captured. The
-	 * window is hardened: `window.open` is denied outright and top-level
-	 * navigation is limited to HTTPS on the exact Amazon login hosts — any
-	 * external navigation is prevented, rejects the promise with a sanitized
-	 * error and closes the window through the same settle path. Cancelling
-	 * (via {@link cancelOAuth}) rejects the promise with
-	 * {@link OAuthFlowCancelledError} after closing the window.
+	 * window is hardened: `window.open` is denied outright and both top-level
+	 * navigation and server 3xx redirects are limited to HTTPS on the exact
+	 * Amazon login hosts — any external navigation or redirect is prevented,
+	 * rejects the promise with a sanitized error and closes the window through
+	 * the same settle path. Cancelling (via {@link cancelOAuth}) rejects the
+	 * promise with {@link OAuthFlowCancelledError} after closing the window.
 	 */
 	private openOAuthWindow(
 		remote: RemoteModule,
@@ -352,20 +353,15 @@ export default class KindleStkPlugin extends Plugin {
 				win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 			}
 
-			win.webContents.on('will-navigate', (...args: unknown[]) => {
-				const [event, url] = args as [unknown, string];
-				if (isAllowedOAuthNavigation(url)) return;
-				(event as { preventDefault: () => void }).preventDefault();
-				done(() => reject(new Error('Authentication navigation was blocked')));
+			wireOAuthNavigation(win.webContents, {
+				isAllowedNavigation: isAllowedOAuthNavigation,
+				checkRedirect: checkUrl,
+				onExternalNavigation: () => done(() => reject(new Error('Authentication navigation was blocked'))),
 			});
 
 			win.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
 				const matched = checkUrl(details.url);
 				callback({ cancel: matched });
-			});
-			win.webContents.on('will-redirect', (...args: unknown[]) => {
-				const [event, url] = args as [unknown, string];
-				if (checkUrl(url)) (event as { preventDefault: () => void }).preventDefault();
 			});
 			win.webContents.on('did-navigate', (...args: unknown[]) => {
 				const [, url] = args as [unknown, string];

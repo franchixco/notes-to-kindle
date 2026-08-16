@@ -2,7 +2,7 @@
 
 ## Project overview
 
-- Display name: **Notes to Kindle**. Plugin id and install folder: **`send-to-kindle`**. Repo: `https://github.com/franchixco/send-to-kindle`.
+- Display name: **Notes to Kindle**. Plugin id and install folder: **`notes-to-kindle`**. Repo: `https://github.com/franchixco/notes-to-kindle`. The pre-community release 0.1.1 shipped as `send-to-kindle`; that id is deprecated history kept only for migration compatibility (see the migration section below).
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
 - What it does: sends Obsidian notes to Kindle as EPUB by talking directly to Amazon's **undocumented/internal Send to Kindle endpoints** (`api.amazon.com`, `firs-ta-g7g.amazon.com`, `stkservice.amazon.com`). This is an **unofficial** integration: not created, sponsored, approved, or endorsed by Amazon; Kindle and Send to Kindle are Amazon marks. There is no public Send to Kindle API. The plugin registers a synthetic device, may stop working without notice, and may carry account/terms risk. Never claim otherwise in docs or copy.
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
@@ -95,22 +95,37 @@ bun run build
 ## Manifest rules (`manifest.json`)
 
 - Must include (non-exhaustive):
-    - `id` (plugin ID; for local dev it should match the folder name — here `send-to-kindle`)
+    - `id` (plugin ID; for local dev it should match the folder name — here `notes-to-kindle`)
     - `name` (here `Notes to Kindle`; keep the display name in sync with README and the plugin settings copy)
     - `version` (Semantic Versioning `x.y.z`)
     - `minAppVersion`
     - `description`
     - `isDesktopOnly` (boolean)
     - Optional: `author`, `authorUrl`, `fundingUrl` (string or map)
-- Treat `send-to-kindle` as stable API from the first official community release (`0.1.1`) onward. Pre-publication development builds used the legacy local ID `obsidian-kindle-stk`; those installs must be migrated to the `send-to-kindle` plugin folder.
+- Treat `notes-to-kindle` as the current stable plugin id. The pre-community release `0.1.1` shipped under `send-to-kindle`; tag `0.1.0` used the earlier development id `obsidian-kindle-stk`. Both remain immutable history, and release workflows map each tag to its original id. Existing installs must migrate to the `notes-to-kindle` plugin folder. See the migration section below.
 - Keep `minAppVersion` accurate when using newer APIs.
 - Canonical requirements are coded here: https://github.com/obsidianmd/obsidian-releases/blob/master/.github/workflows/validate-plugin-entry.yml
+
+## Identity migration (`send-to-kindle` → `notes-to-kindle`)
+
+Since 0.1.2 the plugin id is `notes-to-kindle`; the deprecated `send-to-kindle` id remains only as migration compatibility for the 0.1.1 release. Do not erase or rename it — it is load-bearing for the historical release tag mapping, the preserved SecretStorage keys, and user migration. Migration steps for users upgrading from 0.1.1:
+
+1. Close Obsidian.
+2. Rename the plugin folder `<Vault>/.obsidian/plugins/send-to-kindle/` → `<Vault>/.obsidian/plugins/notes-to-kindle/`. Plugin `data.json` (settings) lives inside the plugin folder, so this preserves settings.
+3. Reopen Obsidian and enable "Notes to Kindle"; remove the stale `send-to-kindle` entry if Obsidian still lists it.
+4. Hotkeys are namespaced by plugin id in Obsidian (`<plugin-id>:<command-id>`). Command IDs `send-note` and `authenticate-amazon` are unchanged, but users must re-bind hotkeys from `send-to-kindle:send-note` / `send-to-kindle:authenticate-amazon` to `notes-to-kindle:send-note` / `notes-to-kindle:authenticate-amazon`.
+5. No reauthentication is required. `src/stk/credentials.ts` keeps the exact historical SecretStorage keys `send-to-kindle-credentials` and `stk-credentials`; existing credentials load as before and `Disconnect` clears both keys.
+
+Constraints (enforced by `test/metadata.test.ts`):
+
+- No remnant of the previously rejected ereader identity anywhere.
+- Lowercase `send-to-kindle` only in: `src/stk/credentials.ts` (historical keys), `test/credentials.test.ts` (historical-key tests), `test/user-agent.test.ts` (negative UA test), `README.md`/`AGENTS.md` (migration docs), `.github/workflows/release.yml` (0.1.1 tag mapping). The capitalized product phrase **Send to Kindle** stays wherever it refers to Amazon's product.
 
 ## Testing
 
 - Manual install for testing: copy `main.js`, `manifest.json`, `styles.css` (if any) to:
     ```
-    <Vault>/.obsidian/plugins/send-to-kindle/
+    <Vault>/.obsidian/plugins/notes-to-kindle/
     ```
 - Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
@@ -295,7 +310,7 @@ this.registerInterval(
 
 ## Troubleshooting
 
-- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and optional `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/send-to-kindle/`.
+- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and optional `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/notes-to-kindle/`.
 - Build issues: if `main.js` is missing or stale, run `bun run build` (or `bun run dev` for watch) to compile the TypeScript source. Do not use npm.
 - Commands not appearing: verify `addCommand` runs after `onload` and IDs are unique.
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.

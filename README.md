@@ -2,7 +2,7 @@
 
 Send your Obsidian notes to your Kindle as EPUB, straight from the Obsidian desktop app.
 
-> **Unofficial integration.** This plugin is not created, sponsored, approved, or endorsed by Amazon. **Kindle** and **Send to Kindle** are trademarks of Amazon.com, Inc. or its affiliates.
+> **Unofficial integration.** This app was not created or endorsed by Amazon. It is not sponsored, approved, or otherwise affiliated with Amazon, and it makes no claim of official status. **Kindle** and **Send to Kindle** are trademarks of Amazon.com, Inc. or its affiliates.
 
 ## What it does
 
@@ -62,8 +62,10 @@ You stay in control. Authentication only happens when you click **Authenticate**
 
 ## Install
 
-1. Copy the release artifacts into `<Vault>/.obsidian/plugins/send-to-kindle/`. Only `main.js` and `manifest.json` are required; `styles.css` is optional and is currently omitted.
+1. Copy the release artifacts into `<Vault>/.obsidian/plugins/notes-to-kindle/`. Only `main.js` and `manifest.json` are required; `styles.css` is optional and is currently omitted.
 2. In Obsidian, open **Settings → Community plugins**, enable "Notes to Kindle", and allow third-party plugins if prompted.
+
+> Installing over the deprecated `send-to-kindle` (0.1.1) folder? See [Migrating from send-to-kindle (0.1.1)](#migrating-from-send-to-kindle-011).
 
 For development:
 
@@ -72,6 +74,16 @@ bun install
 bun run dev      # watch mode
 bun run build    # production build
 ```
+
+## Migrating from `send-to-kindle` (0.1.1)
+
+Releases before 0.1.2 shipped under the plugin id and install folder `send-to-kindle`. The plugin id is now `notes-to-kindle`; `send-to-kindle` is deprecated history and is kept only for migration compatibility. Upgrading from 0.1.1:
+
+1. Close Obsidian.
+2. Rename the plugin folder from `<Vault>/.obsidian/plugins/send-to-kindle/` to `<Vault>/.obsidian/plugins/notes-to-kindle/`. This preserves your settings (`data.json`), because Obsidian stores plugin data inside the plugin folder.
+3. Reopen Obsidian and enable "Notes to Kindle" if it shows as disabled. If Obsidian still lists the old `send-to-kindle` entry, remove it — the new folder replaces it.
+4. Reassign any hotkeys bound to the old command namespace. The command IDs themselves (`send-note`, `authenticate-amazon`) are unchanged, but Obsidian prefixes them with the plugin id, so they are now `notes-to-kindle:send-note` and `notes-to-kindle:authenticate-amazon` instead of `send-to-kindle:...`. Rebind them in **Settings → Hotkeys**.
+5. **No reauthentication is needed.** The plugin keeps reading the exact SecretStorage keys `send-to-kindle-credentials` and the legacy `stk-credentials`, so credentials saved by 0.1.1 load as before, and `Disconnect` still clears both keys.
 
 ## Usage
 

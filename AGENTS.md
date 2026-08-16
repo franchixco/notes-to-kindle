@@ -1,10 +1,10 @@
-# Notes to Kindle — Obsidian community plugin
+# Notes to E-reader — Obsidian community plugin
 
 ## Project overview
 
-- Display name: **Notes to Kindle**. Plugin id and install folder: **`send-to-kindle`**. Repo: `https://github.com/franchixco/send-to-kindle`.
+- Display name: **Notes to E-reader**. Plugin id and install folder: **`notes-to-ereader`** (was `send-to-kindle` before 0.1.2). Repo: `https://github.com/franchixco/notes-to-ereader`.
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
-- What it does: sends Obsidian notes to Kindle as EPUB by talking directly to Amazon's **undocumented/internal Send to Kindle endpoints** (`api.amazon.com`, `firs-ta-g7g.amazon.com`, `stkservice.amazon.com`). This is an **unofficial** integration: not created, sponsored, approved, or endorsed by Amazon; Kindle and Send to Kindle are Amazon marks. There is no public Send to Kindle API. The plugin registers a synthetic device, may stop working without notice, and may carry account/terms risk. Never claim otherwise in docs or copy.
+- What it does: sends Obsidian notes to Kindle as EPUB by talking directly to Amazon's **undocumented/internal Send to Kindle endpoints** (`api.amazon.com`, `firs-ta-g7g.amazon.com`, `stkservice.amazon.com`). This is an **unofficial** integration: This app was not created or endorsed by Amazon. It is not sponsored, approved, or endorsed by Amazon and has no affiliation with Amazon; Kindle and Send to Kindle are Amazon marks. There is no public Send to Kindle API. The plugin registers a synthetic device, may stop working without notice, and may carry account/terms risk. Never claim otherwise in docs or copy.
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
 - Required Obsidian release artifacts: `main.js` and `manifest.json`; include `styles.css` only when non-empty. Releases also attach `LICENSE` and `THIRD_PARTY_NOTICES.md` for attribution.
 - `isDesktopOnly: true` — requires Node APIs (`crypto`) and Electron (sandboxed BrowserWindow for OAuth) not available on Obsidian mobile.
@@ -95,14 +95,14 @@ bun run build
 ## Manifest rules (`manifest.json`)
 
 - Must include (non-exhaustive):
-    - `id` (plugin ID; for local dev it should match the folder name — here `send-to-kindle`)
-    - `name` (here `Notes to Kindle`; keep the display name in sync with README and the plugin settings copy)
+    - `id` (plugin ID; for local dev it should match the folder name — here `notes-to-ereader`)
+    - `name` (here `Notes to E-reader`; keep the display name in sync with README and the plugin settings copy)
     - `version` (Semantic Versioning `x.y.z`)
     - `minAppVersion`
     - `description`
     - `isDesktopOnly` (boolean)
     - Optional: `author`, `authorUrl`, `fundingUrl` (string or map)
-- Treat `send-to-kindle` as stable API from the first official community release (`0.1.1`) onward. Pre-publication development builds used the legacy local ID `obsidian-kindle-stk`; those installs must be migrated to the `send-to-kindle` plugin folder.
+- The plugin ID is `notes-to-ereader` from the first community-submitted release (`0.1.2`) onward. The pre-community technical identity `send-to-kindle` (public `0.1.1`) is immutable history: the release workflow maps tag `0.1.1` back to `send-to-kindle`, and SecretStorage keeps the `send-to-kindle-credentials` key so existing credentials load without reauth. 0.1.2+ installs live in the `notes-to-ereader` folder; 0.1.1 installs must move their folder/data/hotkey namespace. Pre-publication development builds used the legacy local ID `obsidian-kindle-stk`; those installs must be migrated to the `notes-to-ereader` plugin folder.
 - Keep `minAppVersion` accurate when using newer APIs.
 - Canonical requirements are coded here: https://github.com/obsidianmd/obsidian-releases/blob/master/.github/workflows/validate-plugin-entry.yml
 
@@ -110,7 +110,7 @@ bun run build
 
 - Manual install for testing: copy `main.js`, `manifest.json`, `styles.css` (if any) to:
     ```
-    <Vault>/.obsidian/plugins/send-to-kindle/
+    <Vault>/.obsidian/plugins/notes-to-ereader/
     ```
 - Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
@@ -295,7 +295,7 @@ this.registerInterval(
 
 ## Troubleshooting
 
-- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and optional `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/send-to-kindle/`.
+- Plugin doesn't load after build: ensure `main.js`, `manifest.json`, and optional `styles.css` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/notes-to-ereader/`.
 - Build issues: if `main.js` is missing or stale, run `bun run build` (or `bun run dev` for watch) to compile the TypeScript source. Do not use npm.
 - Commands not appearing: verify `addCommand` runs after `onload` and IDs are unique.
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.

@@ -3,6 +3,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 import { buildEpub } from '../src/epub/builder';
 import { renderBodyHtml } from '../src/epub/render';
+import { isXml10CodePoint } from '../src/epub/xml';
 import type { ExtractedNote } from '../src/obsidian-extract/extract';
 
 function note(bodyMarkdown: string): ExtractedNote {
@@ -25,6 +26,11 @@ function assertParsesAsXml(xml: string): void {
 		new DOMParser({
 			onError: (level, message) => {
 				if (level === 'warning' || level === 'error' || level === 'fatalError') {
+					// xmldom warns on any U+FFFD as a source-encoding heuristic,
+					// but U+FFFD is valid XML 1.0 and is exactly what our
+					// sanitizer emits, so that one known-benign warning is
+					// ignored; every other warning/error still fails.
+					if (level === 'warning' && message.includes('replacement character')) return;
 					problems.push(`${level}: ${message}`);
 				}
 			},
@@ -34,6 +40,23 @@ function assertParsesAsXml(xml: string): void {
 	}
 	expect(problems, xml).toEqual([]);
 }
+
+// Code-point scan for literal characters that XML 1.0 forbids, independent of
+// any parser leniency: astral pairs iterate as one code point and lone
+// surrogates surface as invalid code units.
+function assertNoForbiddenCodePoints(xml: string): void {
+	for (const ch of xml) {
+		const codePoint = ch.codePointAt(0) ?? -1;
+		expect(isXml10CodePoint(codePoint), `forbidden U+${codePoint.toString(16)} in XML`).toBe(
+			true,
+		);
+	}
+}
+
+// Literal code points that XML 1.0 forbids, exercised through the full EPUB
+// build. Lone surrogates are covered separately because joining them could
+// accidentally form a valid astral pair.
+const FORBIDDEN_LITERALS = ['\u0000', '\u0001', '\u0008', '\u000B', '\u000C', '\uFFFE', '\uFFFF'];
 
 describe('renderBodyHtml', () => {
 	it('escapes raw script tags', () => {
@@ -282,6 +305,79 @@ describe('buildEpub', () => {
 		expect(html).toContain('&#9;');
 		expect(html).toContain('&#x10FFFF;');
 		assertParsesAsXml(html);
+	});
+
+	it('replaces literal XML 1.0-invalid code points in the body with U+FFFD', async () => {
+		const body = `before${FORBIDDEN_LITERALS.join('')}after`;
+		const html = await chapterHtml(body);
+		for (const bad of FORBIDDEN_LITERALS) {
+			expect(html, JSON.stringify(bad)).not.toContain(bad);
+		}
+		expect(html).toContain('before');
+		expect(html).toContain('after');
+		expect(html.match(/\uFFFD/g)?.length ?? 0).toBe(FORBIDDEN_LITERALS.length);
+		assertNoForbiddenCodePoints(html);
+		assertParsesAsXml(html);
+	});
+
+	it('replaces lone surrogates in the body with U+FFFD while keeping paired astral characters', async () => {
+		const html = await chapterHtml('a\uD800b\uDC00c\uD83D\uDE00d');
+		expect(html).toContain('c\u{1F600}d');
+		// The two lone surrogates must each become one U+FFFD; the emoji pair
+		// stays intact and must not be counted as replacements.
+		expect(html.match(/\uFFFD/g)?.length ?? 0).toBe(2);
+		assertNoForbiddenCodePoints(html);
+		assertParsesAsXml(html);
+	});
+
+	it('sanitizes literal XML 1.0-invalid code points in the title and author', async () => {
+		const title = `Ti\u0001tle\uFFFE`;
+		const author = `Au\uD800thor\uFFFF`;
+		const epub = await buildEpub(note('Contenido'), { title, author });
+		const zip = await JSZip.loadAsync(Buffer.from(epub));
+		const opf = await zip.file('OEBPS/content.opf')!.async('string');
+		const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
+		const chapter = await zip.file('OEBPS/chapter1.xhtml')!.async('string');
+
+		for (const xml of [opf, nav, chapter]) {
+			assertNoForbiddenCodePoints(xml);
+			assertParsesAsXml(xml);
+		}
+		expect(opf).toContain('\uFFFD');
+		expect(nav).toContain('\uFFFD');
+		expect(chapter).toContain('\uFFFD');
+		expect(opf).not.toContain('\u0001');
+		expect(opf).not.toContain('\uFFFE');
+		expect(opf).not.toContain('\uFFFF');
+		expect(chapter).not.toContain('\u0001');
+		expect(chapter).not.toContain('\uFFFE');
+	});
+
+	it('preserves tab, LF, U+FFFD and astral code points through the body', async () => {
+		const html = await chapterHtml('tab\there  \uFFFD  \u{10000}  \u{1F600} final');
+		expect(html).toContain('tab\there');
+		expect(html).toContain('\uFFFD');
+		expect(html).toContain('\u{10000}');
+		expect(html).toContain('\u{1F600}');
+		expect(html).toContain('final');
+		assertNoForbiddenCodePoints(html);
+		assertParsesAsXml(html);
+	});
+
+	it('produces clean OPF, nav and chapter metadata for valid astral titles', async () => {
+		const epub = await buildEpub(note('Contenido'), {
+			title: 'Nota \u{1F4D6} \u{10000}',
+			author: 'Autor',
+		});
+		const zip = await JSZip.loadAsync(Buffer.from(epub));
+		const opf = await zip.file('OEBPS/content.opf')!.async('string');
+		const nav = await zip.file('OEBPS/nav.xhtml')!.async('string');
+		expect(opf).toContain('Nota \u{1F4D6} \u{10000}');
+		expect(nav).toContain('Nota \u{1F4D6} \u{10000}');
+		assertNoForbiddenCodePoints(opf);
+		assertNoForbiddenCodePoints(nav);
+		assertParsesAsXml(opf);
+		assertParsesAsXml(nav);
 	});
 
 	it('produces a valid EPUB zip structure', async () => {

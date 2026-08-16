@@ -1,6 +1,7 @@
 import type { ExtractedNote } from '../obsidian-extract/extract';
 import type crypto from 'crypto';
 import { renderBodyHtml } from './render';
+import { sanitizeXmlText } from './xml';
 import JSZip from 'jszip';
 
 export interface EpubOptions {
@@ -9,7 +10,7 @@ export interface EpubOptions {
 }
 
 function escapeXml(s: string): string {
-	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+	return sanitizeXmlText(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 

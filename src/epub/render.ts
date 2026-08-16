@@ -5,6 +5,7 @@ import type {
 	TokenizerThis,
 	Tokens,
 } from 'marked';
+import { isXml10CodePoint, sanitizeXmlText } from './xml';
 
 const SAFE_LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 
@@ -36,18 +37,9 @@ function parseNumericRef(body: string): number | null {
 }
 
 // XML 1.0 Char production: #x9 | #xA | #xD | [#x20-#xD7FF] |
-// [#xE000-#xFFFD] | [#x10000-#x10FFFF].
-function isValidXmlCharRef(codePoint: number): boolean {
-	return (
-		codePoint === 0x9
-		|| codePoint === 0xa
-		|| codePoint === 0xd
-		|| (codePoint >= 0x20 && codePoint <= 0xd7ff)
-		|| (codePoint >= 0xe000 && codePoint <= 0xfffd)
-		|| (codePoint >= 0x10000 && codePoint <= 0x10ffff)
-	);
-}
-
+// [#xE000-#xFFFD] | [#x10000-#x10FFFF]. Shared with the builder via
+// `isXml10CodePoint` in `./xml`; numeric character references are checked
+// against the same definition so a reference and a literal never diverge.
 function escapeXml(value: string): string {
 	return value
 		.replace(/&/g, '&amp;')
@@ -154,7 +146,7 @@ function guardXmlEntities(html: string): string {
 		}
 		if (body.startsWith('#')) {
 			const codePoint = parseNumericRef(body);
-			if (codePoint !== null && isValidXmlCharRef(codePoint)) return match;
+			if (codePoint !== null && isXml10CodePoint(codePoint)) return match;
 			return `&amp;${body};`;
 		}
 		if (XML_PREDEFINED_ENTITIES.has(body)) return match;
@@ -163,5 +155,5 @@ function guardXmlEntities(html: string): string {
 }
 
 export function renderBodyHtml(markdown: string): string {
-	return guardXmlEntities(stkMarked.parse(markdown, { async: false }));
+	return sanitizeXmlText(guardXmlEntities(stkMarked.parse(markdown, { async: false })));
 }

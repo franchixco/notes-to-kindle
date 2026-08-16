@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "obsidian-sample-plugin",
+      "name": "send-to-kindle",
       "dependencies": {
         "jszip": "^3.10.1",
         "marked": "^18.0.5",

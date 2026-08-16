@@ -111,7 +111,7 @@ export default class KindleStkPlugin extends Plugin {
 		}
 
 		this.addCommand({
-			id: 'send-to-kindle',
+			id: 'send-note',
 			name: 'Send current note to Kindle',
 			editorCallback: (_editor, view) => {
 				if (view.file) void this.sendToKindle(view.file);

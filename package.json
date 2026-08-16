@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-kindle-stk",
+	"name": "send-to-kindle",
 	"version": "0.1.0",
-	"description": "Send Obsidian notes to Kindle via Amazon Send to Kindle API. 100% local, no server.",
+	"description": "Convert notes to EPUB locally and send them to Amazon Kindle using an unofficial desktop integration.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

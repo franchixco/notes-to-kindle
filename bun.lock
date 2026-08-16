@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "send-to-kindle",
+      "name": "notes-to-kindle",
       "dependencies": {
         "jszip": "^3.10.1",
         "marked": "^18.0.9",

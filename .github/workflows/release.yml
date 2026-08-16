@@ -74,8 +74,11 @@ jobs:
                   } else if (versions[manifest.version] !== manifest.minAppVersion) {
                       failures.push(`versions.json["${manifest.version}"] is "${versions[manifest.version]}", expected minAppVersion "${manifest.minAppVersion}"`);
                   }
-                  if (manifest.id !== "send-to-kindle") {
-                      failures.push(`manifest.json id is "${manifest.id}", expected "send-to-kindle"`);
+                  // Public 0.1.1 shipped under the historical id `send-to-kindle`
+                  // and is immutable; 0.1.2 and later ship under `notes-to-ereader`.
+                  const expectedId = tag === "0.1.1" ? "send-to-kindle" : "notes-to-ereader";
+                  if (manifest.id !== expectedId) {
+                      failures.push(`manifest.json id is "${manifest.id}", expected "${expectedId}" for tag "${tag}"`);
                   }
                   if (failures.length > 0) {
                       for (const failure of failures) {

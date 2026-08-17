@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { posix } from 'node:path';
-import { extractNote } from '../src/obsidian-extract/extract';
+import {
+	collectRemoteImageReferences,
+	extractNote,
+	prepareNote,
+} from '../src/obsidian-extract/extract';
 import { MAX_IMAGE_BYTES } from '../src/images/types';
 
 type ExtractApp = Parameters<typeof extractNote>[0];
@@ -288,5 +292,111 @@ describe('extractNote', () => {
 		expect(note.embeds).toEqual([]);
 		expect(note.assets).toEqual([]);
 		expect(note.warnings).toEqual([]);
+	});
+});
+
+describe('remote image extraction', () => {
+	it('collects inline and reference-style image tokens but excludes code and raw HTML', () => {
+		const markdown = [
+			'![inline](https://cdn.example/inline.png)',
+			'![reference][photo]',
+			'[photo]: https://cdn.example/reference.jpg',
+			'`![code](https://cdn.example/code.png)`',
+			'```md\n![fenced](https://cdn.example/fenced.png)\n```',
+			'<img src="https://cdn.example/html.png">',
+			'![http](http://cdn.example/insecure.png)',
+		].join('\n\n');
+		const result = collectRemoteImageReferences(markdown);
+		expect(result.references.map((item) => item.href)).toEqual([
+			'https://cdn.example/inline.png',
+			'https://cdn.example/reference.jpg',
+		]);
+		expect(result.overflow).toBe(false);
+	});
+
+	it('discovers remote images after expanding embedded notes', async () => {
+		const prepared = await prepareNote(makeFakeApp([
+			{ path: 'root.md', content: '![[nested]]' },
+			{ path: 'nested.md', content: '![nested remote](https://cdn.example/nested.jpg)' },
+		]), makeFakeFile('root.md'));
+		expect(prepared.remoteImages).toEqual([{ href: 'https://cdn.example/nested.jpg' }]);
+	});
+
+	it('does not call the loader before opt-in and registers approved bytes', async () => {
+		let calls = 0;
+		const app = makeFakeApp([{
+			path: 'root.md',
+			content: '![remote](https://cdn.example/photo.jpg "Remote title")',
+		}]);
+		const prepared = await prepareNote(app, makeFakeFile('root.md'), async (href, maxBytes) => {
+			calls += 1;
+			expect(href).toBe('https://cdn.example/photo.jpg');
+			expect(maxBytes).toBe(MAX_IMAGE_BYTES);
+			return { data: jpeg(), mediaType: 'image/jpeg', finalUrl: href };
+		});
+		expect(calls).toBe(0);
+		expect(prepared.remoteImages).toEqual([{ href: 'https://cdn.example/photo.jpg' }]);
+
+		const note = await prepared.includeRemoteImages();
+		expect(calls).toBe(1);
+		expect(note.assets).toHaveLength(1);
+		expect(note.remoteImageMap?.get('https://cdn.example/photo.jpg')).toMatch(/^images\//);
+		expect(note.remoteImageCount).toBe(1);
+		expect(note.warnings).toEqual([]);
+	});
+
+	it('omits failed downloads without aborting the note', async () => {
+		const app = makeFakeApp([{
+			path: 'root.md',
+			content: 'before ![remote](https://cdn.example/photo.jpg) after',
+		}]);
+		const prepared = await prepareNote(app, makeFakeFile('root.md'), async () => {
+			throw new Error('secret transport detail');
+		});
+		const note = await prepared.includeRemoteImages();
+		expect(note.bodyMarkdown).toContain('![remote](https://cdn.example/photo.jpg)');
+		expect(note.assets).toEqual([]);
+		expect(note.warnings?.[0]).toMatchObject({
+			code: 'remote-image-failed',
+			message: 'Remote image was omitted because its download failed.',
+		});
+	});
+
+	it('caps unique remote references at twenty before any network work', async () => {
+		const content = Array.from(
+			{ length: 25 },
+			(_, index) => `![remote ${index}](https://cdn.example/${index}.jpg)`,
+		).join('\n');
+		let calls = 0;
+		const prepared = await prepareNote(
+			makeFakeApp([{ path: 'root.md', content }]),
+			makeFakeFile('root.md'),
+			async (href) => { calls += 1; return { data: jpeg(), mediaType: 'image/jpeg', finalUrl: href }; },
+		);
+		expect(prepared.remoteImages).toHaveLength(20);
+		const note = await prepared.includeRemoteImages();
+		expect(calls).toBe(20);
+		expect(note.remoteImageCount).toBe(20);
+		expect(note.warnings?.some((item) => item.message.includes('after the first 20'))).toBe(true);
+	});
+
+	it('aborts the whole remote phase without continuing to later references', async () => {
+		const controller = new AbortController();
+		let calls = 0;
+		const prepared = await prepareNote(makeFakeApp([{
+			path: 'root.md',
+			content: '![one](https://cdn.example/one.jpg) ![two](https://cdn.example/two.jpg)',
+		}]), makeFakeFile('root.md'), async (_href, _maxBytes, signal) => {
+			calls += 1;
+			return new Promise((_resolve, reject) => {
+				signal?.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+			});
+		});
+		const inclusion = prepared.includeRemoteImages(controller.signal);
+		controller.abort();
+		let thrown: unknown;
+		try { await inclusion; } catch (error) { thrown = error; }
+		expect(thrown).toMatchObject({ name: 'AbortError' });
+		expect(calls).toBe(1);
 	});
 });

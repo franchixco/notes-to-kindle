@@ -61,11 +61,17 @@ function renderAltText(this: Renderer, token: Tokens.Image): string {
 	return `<span class="stk-image">${escapeXml(alt)}</span>`;
 }
 
-function renderImage(this: Renderer, token: Tokens.Image, allowedImages: ReadonlySet<string>): string {
-	if (!allowedImages.has(token.href)) return renderAltText.call(this, token);
+function renderImage(
+	this: Renderer,
+	token: Tokens.Image,
+	allowedImages: ReadonlySet<string>,
+	remoteImageMap: ReadonlyMap<string, string>,
+): string {
+	const href = remoteImageMap.get(token.href) ?? token.href;
+	if (!allowedImages.has(href)) return renderAltText.call(this, token);
 	const alt = this.parser.parseInline(token.tokens, this.parser.textRenderer).trim();
 	const titleAttr = token.title ? ` title="${escapeXml(token.title)}"` : '';
-	return `<img class="stk-image" src="${escapeXml(token.href)}" alt="${escapeXml(alt)}"${titleAttr} />`;
+	return `<img class="stk-image" src="${escapeXml(href)}" alt="${escapeXml(alt)}"${titleAttr} />`;
 }
 
 function isSafeLinkHref(href: string): boolean {
@@ -123,13 +129,13 @@ const highlightExtension: TokenizerAndRendererExtension = {
 // marked only adopts the enumerable own properties of a renderer option, so
 // the hardened renderers are assigned onto a base Renderer instance instead
 // of subclassing it.
-function createMarked(allowedImages: ReadonlySet<string>): Marked {
+function createMarked(allowedImages: ReadonlySet<string>, remoteImageMap: ReadonlyMap<string, string>): Marked {
 	const renderer = new Renderer();
 	renderer.html = renderHtmlToken;
 	renderer.br = (): string => '<br />';
 	renderer.hr = (): string => '<hr />';
 	renderer.image = function image(token: Tokens.Image): string {
-		return renderImage.call(this, token, allowedImages);
+		return renderImage.call(this, token, allowedImages, remoteImageMap);
 	};
 	renderer.checkbox = renderCheckbox;
 	renderer.link = renderLink;
@@ -164,6 +170,10 @@ function guardXmlEntities(html: string): string {
 	});
 }
 
-export function renderBodyHtml(markdown: string, allowedImages: ReadonlySet<string> = new Set()): string {
-	return sanitizeXmlText(guardXmlEntities(createMarked(allowedImages).parse(markdown, { async: false })));
+export function renderBodyHtml(
+	markdown: string,
+	allowedImages: ReadonlySet<string> = new Set(),
+	remoteImageMap: ReadonlyMap<string, string> = new Map(),
+): string {
+	return sanitizeXmlText(guardXmlEntities(createMarked(allowedImages, remoteImageMap).parse(markdown, { async: false })));
 }

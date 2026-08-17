@@ -146,7 +146,11 @@ export async function buildEpub(note: ExtractedNote, opts: EpubOptions): Promise
 	const bookId = nodeCrypto.randomUUID();
 	const modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 	const assets = validateAssets(note.assets ?? [], nodeCrypto);
-	const htmlBody = renderBodyHtml(note.bodyMarkdown, new Set(assets.map((asset) => asset.href)));
+	const htmlBody = renderBodyHtml(
+		note.bodyMarkdown,
+		new Set(assets.map((asset) => asset.href)),
+		note.remoteImageMap,
+	);
 
 	// Object insertion order keeps mimetype as the first local file header. EPUB
 	// additionally requires that entry to use STORE while the rest use DEFLATE.

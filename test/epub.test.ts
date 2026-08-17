@@ -254,6 +254,20 @@ describe('renderBodyHtml', () => {
 		assertParsesAsXml(`<html xmlns="http://www.w3.org/1999/xhtml"><body>${html}</body></html>`);
 	});
 
+	it('maps an approved remote image token to its packaged asset', () => {
+		const asset = jpegAsset();
+		const remote = 'https://cdn.example/photo.jpg?token=opaque';
+		const html = renderBodyHtml(
+			`![remote](${remote} "title")`,
+			new Set([asset.href]),
+			new Map([[remote, asset.href]]),
+		);
+		expect(html).toContain(`src="${asset.href}"`);
+		expect(html).toContain('alt="remote"');
+		expect(html).toContain('title="title"');
+		expect(html).not.toContain('cdn.example');
+	});
+
 	it('does not trust a hash-shaped image path without registry approval', () => {
 		const asset = jpegAsset();
 		const html = renderBodyHtml(`![forged](${asset.href})`);

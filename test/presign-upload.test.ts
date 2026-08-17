@@ -236,6 +236,40 @@ describe('uploadToPresignedUrl', () => {
 		await expectRejectsWith(promise, 'Upload failed: request timed out');
 	});
 
+	it('rejects before creating a request when already cancelled', async () => {
+		const controller = new AbortController();
+		controller.abort();
+		let factoryCalls = 0;
+		const promise = uploadToPresignedUrl(
+			new URL('https://bucket.s3.amazonaws.com/key.epub'),
+			TEST_PAYLOAD,
+			() => { factoryCalls += 1; throw new Error('request factory should not run'); },
+			{ signal: controller.signal },
+		);
+		await expectRejectsWith(promise, 'Upload failed: cancelled');
+		expect(factoryCalls).toBe(0);
+	});
+
+	it('destroys an active upload and clears its deadline when cancelled', async () => {
+		const controller = new AbortController();
+		const { request, promise, timer } = makeHarness({ signal: controller.signal });
+		controller.abort();
+		await expectRejectsWith(promise, 'Upload failed: cancelled');
+		expect(request.destroyed).toBe(true);
+		expect(timer.pendingCount()).toBe(0);
+	});
+
+	it('removes the cancellation listener after a successful upload', async () => {
+		const controller = new AbortController();
+		const { request, promise } = makeHarness({ signal: controller.signal });
+		const response = new FakeResponse(200);
+		request.emit('response', response);
+		response.finish();
+		await promise;
+		controller.abort();
+		expect(request.destroyed).toBe(false);
+	});
+
 	it('uses the default inactivity timeout when none is configured', async () => {
 		const { request, promise } = makeHarness();
 		expect(request.timeoutMs).toBe(UPLOAD_TIMEOUT_MS);

@@ -56,6 +56,7 @@ export interface UploadToPresignedUrlOptions {
 	maxErrorBodyBytes?: number;
 	deadlineMs?: number;
 	timer?: UploadTimer;
+	signal?: AbortSignal;
 }
 
 export const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
@@ -91,14 +92,20 @@ export function uploadToPresignedUrl(
 	const deadlineMs = options?.deadlineMs ?? UPLOAD_DEADLINE_MS;
 	const timer = options?.timer ?? defaultTimer;
 	const maxErrorBodyBytes = options?.maxErrorBodyBytes ?? UPLOAD_MAX_ERROR_BODY_BYTES;
+	const signal = options?.signal;
 
 	return new Promise<void>((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(new UploadRequestError('Upload failed: cancelled'));
+			return;
+		}
 		let settled = false;
 		let deadlineHandle: unknown = null;
 		const settle = (fn: () => void): void => {
 			if (settled) return;
 			settled = true;
 			if (deadlineHandle !== null) timer.clearTimeout(deadlineHandle);
+			signal?.removeEventListener('abort', onAbort);
 			fn();
 		};
 		const fail = (message: string): void => {
@@ -106,6 +113,10 @@ export function uploadToPresignedUrl(
 		};
 
 		let req: UploadClientRequest;
+		const onAbort = (): void => {
+			settle(() => reject(new UploadRequestError('Upload failed: cancelled')));
+			try { req.destroy(); } catch { /* Request may already be closed. */ }
+		};
 		try {
 			req = requestFactory({
 				protocol: url.protocol,
@@ -142,6 +153,11 @@ export function uploadToPresignedUrl(
 				// The socket may already be gone; the settled failure is enough.
 			}
 		}, deadlineMs);
+		signal?.addEventListener('abort', onAbort, { once: true });
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
 
 		req.on('error', () => {
 			fail('Upload failed: request error');

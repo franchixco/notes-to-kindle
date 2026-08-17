@@ -47,16 +47,21 @@ export interface SendOptions {
 	author: string;
 	format: 'EPUB' | 'PDF';
 	targetSerials: string[];
+	signal?: AbortSignal;
 }
 
 interface AccessTokenResponse {
 	access_token: string;
 }
 
-function uploadFileToPresignedUrl(url: string, fileBuffer: Buffer): Promise<void> {
+function uploadFileToPresignedUrl(url: string, fileBuffer: Buffer, signal?: AbortSignal): Promise<void> {
 	const target = validateUploadUrl(url);
 	const requestFactory: UploadRequestFactory = (options) => nodeHttps.request(options);
-	return uploadToPresignedUrl(target, fileBuffer, requestFactory);
+	return uploadToPresignedUrl(target, fileBuffer, requestFactory, { signal });
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+	if (signal?.aborted) throw new DOMException('Send cancelled.', 'AbortError');
 }
 
 // Remote response bodies must never reach thrown errors or logs. A remote
@@ -279,6 +284,7 @@ export async function sendToKindle(
 	creds: StkCredentials,
 	opts: SendOptions,
 ): Promise<void> {
+	throwIfCancelled(opts.signal);
 	const stats = nodeFs.statSync(opts.filePath);
 	const fileSize = stats.size;
 
@@ -287,11 +293,14 @@ export async function sendToKindle(
 		'/GetUploadUrl',
 		{ ClientInfo: DEFAULT_CLIENT_INFO, fileSize },
 	);
+	throwIfCancelled(opts.signal);
 	const uploadData = parseUploadUrlResponse(uploadResponse);
 
 	const fileBuffer = nodeFs.readFileSync(opts.filePath);
+	throwIfCancelled(opts.signal);
 
-	await uploadFileToPresignedUrl(uploadData.uploadUrl, fileBuffer);
+	await uploadFileToPresignedUrl(uploadData.uploadUrl, fileBuffer, opts.signal);
+	throwIfCancelled(opts.signal);
 
 	const sendBody: SendToKindleRequestBody = {
 		ClientInfo: DEFAULT_CLIENT_INFO,
@@ -308,7 +317,9 @@ export async function sendToKindle(
 		targetDevices: opts.targetSerials,
 	};
 
+	throwIfCancelled(opts.signal);
 	await signedPost(creds, '/SendToKindle', sendBody);
+	throwIfCancelled(opts.signal);
 }
 
 export function buildAmazonAuthUrl(pkce: PkcePair): string {

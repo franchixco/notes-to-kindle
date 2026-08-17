@@ -1,9 +1,13 @@
 import { Notice, Platform, Plugin, SuggestModal, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS, KindleStkSettings, KindleStkSettingTab } from './settings';
-import { extractNote } from './obsidian-extract/extract';
+import { prepareNote } from './obsidian-extract/extract';
 import { buildEpub } from './epub/builder';
 import { createTempEpubFile } from './epub/temp';
-import { closeActiveImagePreflights, confirmImageSend } from './images/preflight';
+import {
+	closeActiveImagePreflights,
+	confirmImageSend,
+	confirmRemoteImageDownload,
+} from './images/preflight';
 import { generatePkce } from './stk/oauth';
 import { OperationTracker } from './lifecycle';
 import {
@@ -121,6 +125,8 @@ export default class KindleStkPlugin extends Plugin {
 	private authTimeoutId: number | null = null;
 	private cancelActiveAuth: (() => void) | null = null;
 	private sendInProgress = false;
+	private sendAbortController: AbortController | null = null;
+	private sendDestinationModal: SendDestinationModal | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -148,6 +154,7 @@ export default class KindleStkPlugin extends Plugin {
 
 	onunload(): void {
 		this.cancelOAuth();
+		this.cancelSend();
 		closeActiveImagePreflights();
 	}
 
@@ -177,6 +184,7 @@ export default class KindleStkPlugin extends Plugin {
 
 	async disconnect(): Promise<void> {
 		this.cancelOAuth();
+		this.cancelSend();
 		disconnectCredentials(this.app.secretStorage);
 		this.settings.lastDeviceSerial = null;
 		await this.saveSettings();
@@ -457,14 +465,25 @@ export default class KindleStkPlugin extends Plugin {
 			return;
 		}
 		this.sendInProgress = true;
+		const controller = new AbortController();
+		this.sendAbortController = controller;
 		try {
-			await this.sendToKindleOnce(file);
+			await this.sendToKindleOnce(file, controller.signal);
 		} finally {
+			if (this.sendAbortController === controller) this.sendAbortController = null;
 			this.sendInProgress = false;
 		}
 	}
 
-	private async sendToKindleOnce(file: TFile): Promise<void> {
+	private cancelSend(): void {
+		this.sendAbortController?.abort();
+		this.sendAbortController = null;
+		this.sendDestinationModal?.close();
+		this.sendDestinationModal = null;
+		closeActiveImagePreflights();
+	}
+
+	private async sendToKindleOnce(file: TFile, signal: AbortSignal): Promise<void> {
 		const creds = this.getCredentials();
 		if (!creds) {
 			new Notice('Not authenticated. Run "authenticate with Amazon" first.');
@@ -475,11 +494,14 @@ export default class KindleStkPlugin extends Plugin {
 		try {
 			devices = await listOwnedDevices(creds);
 		} catch (err) {
+			if (signal.aborted) return;
 			new Notice('Failed to list Kindle devices: ' + (err as Error).message);
 			return;
 		}
+		if (signal.aborted) return;
 
 		const targetSerials = await this.chooseTargetSerials(devices);
+		if (signal.aborted) return;
 		if (targetSerials === null) {
 			new Notice('Send cancelled.');
 			return;
@@ -487,20 +509,32 @@ export default class KindleStkPlugin extends Plugin {
 
 		try {
 			new Notice('Preparing note...');
-			const note = await extractNote(this.app, file);
+			const prepared = await prepareNote(this.app, file);
+			if (signal.aborted) return;
+			let note = prepared.note;
+			if (prepared.remoteImages.length > 0
+				&& await confirmRemoteImageDownload(this.app, prepared.remoteImages)) {
+				if (signal.aborted) return;
+				new Notice('Downloading remote images...');
+				note = await prepared.includeRemoteImages(signal);
+			}
+			if (signal.aborted) return;
 			const imageWarnings = note.warnings ?? [];
 			const imageAssets = note.assets ?? [];
 			if (imageWarnings.length > 0) {
-				new Notice(`${imageWarnings.length} local image${imageWarnings.length === 1 ? ' was' : 's were'} omitted from the EPUB.`);
+				new Notice(`${imageWarnings.length} image${imageWarnings.length === 1 ? ' was' : 's were'} omitted from the EPUB.`);
 			}
-			if (!await confirmImageSend(this.app, imageAssets)) {
+			if (!await confirmImageSend(this.app, imageAssets, note.remoteImageCount)) {
+				if (signal.aborted) return;
 				new Notice('Send cancelled.');
 				return;
 			}
+			if (signal.aborted) return;
 			const epub = await buildEpub(note, {
 				title: note.title,
 				author: this.settings.defaultAuthor,
 			});
+			if (signal.aborted) return;
 			const tempFile = createTempEpubFile(Buffer.from(epub));
 
 			try {
@@ -511,13 +545,15 @@ export default class KindleStkPlugin extends Plugin {
 					author: this.settings.defaultAuthor,
 					format: 'EPUB',
 					targetSerials,
+					signal,
 				});
 
-				new Notice(`"${note.title}" sent to Kindle.`);
+				if (!signal.aborted) new Notice(`"${note.title}" sent to Kindle.`);
 			} finally {
 				tempFile.cleanup();
 			}
 		} catch (err) {
+			if (signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) return;
 			new Notice('Failed to send: ' + (err as Error).message);
 			console.error('STK send failed', err);
 		}
@@ -555,7 +591,13 @@ export default class KindleStkPlugin extends Plugin {
 		];
 
 		const orderedOptions = options.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-		const choice = await new SendDestinationModal(this, orderedOptions).choose();
-		return choice?.serials ?? null;
+		const modal = new SendDestinationModal(this, orderedOptions);
+		this.sendDestinationModal = modal;
+		try {
+			const choice = await modal.choose();
+			return choice?.serials ?? null;
+		} finally {
+			if (this.sendDestinationModal === modal) this.sendDestinationModal = null;
+		}
 	}
 }

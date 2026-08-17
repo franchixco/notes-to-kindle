@@ -23,13 +23,19 @@ class ImagePreflightModal extends Modal {
 	onOpen(): void {
 		activeImagePreflights.add(this);
 		const totalBytes = this.assets.reduce((total, asset) => total + asset.data.byteLength, 0);
+		const convertedCount = this.assets.filter((asset) => asset.convertedFrom !== undefined).length;
 		this.setTitle('Include local images?');
 		this.contentEl.createEl('p', {
 			text: `${this.assets.length} local image${this.assets.length === 1 ? '' : 's'} (${formatBytes(totalBytes)}) will be included in the EPUB and sent to Amazon.`,
 		});
 		this.contentEl.createEl('p', {
-			text: 'Original image bytes may contain embedded metadata such as camera details, exif or gps location.',
+			text: 'Images included without conversion may retain embedded metadata such as camera details, exif or gps location.',
 		});
+		if (convertedCount > 0) {
+			this.contentEl.createEl('p', {
+				text: `${convertedCount} image${convertedCount === 1 ? '' : 's'} will be flattened onto white and converted to JPEG. Source metadata is not intentionally copied.`,
+			});
+		}
 		new Setting(this.contentEl)
 			.addButton((button) => {
 				button.setButtonText('Cancel');

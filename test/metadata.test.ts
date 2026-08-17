@@ -42,12 +42,12 @@ const ALLOWED_SEND_TO_KINDLE = new Set([
 	'.github/workflows/release.yml',
 ]);
 
-describe('identity metadata (0.1.5)', () => {
-	it('manifest.json declares the notes-to-kindle identity for 0.1.5', () => {
+describe('identity metadata (0.1.6)', () => {
+	it('manifest.json declares the notes-to-kindle identity for 0.1.6', () => {
 		const manifest = readJson('manifest.json');
 		expect(manifest.id).toBe('notes-to-kindle');
 		expect(manifest.name).toBe('Notes to Kindle');
-		expect(manifest.version).toBe('0.1.5');
+		expect(manifest.version).toBe('0.1.6');
 		expect(manifest.minAppVersion).toBe('1.11.4');
 		expect(manifest.isDesktopOnly).toBe(true);
 	});
@@ -64,7 +64,7 @@ describe('identity metadata (0.1.5)', () => {
 		expect(pkg.dependencies).not.toHaveProperty('jszip');
 	});
 
-	it('versions.json preserves release history and adds 0.1.5', () => {
+	it('versions.json preserves release history and adds 0.1.6', () => {
 		const versions = readJson('versions.json');
 		expect(versions['0.1.0']).toBe('1.11.4');
 		expect(versions['0.1.1']).toBe('1.11.4');
@@ -72,6 +72,7 @@ describe('identity metadata (0.1.5)', () => {
 		expect(versions['0.1.3']).toBe('1.11.4');
 		expect(versions['0.1.4']).toBe('1.11.4');
 		expect(versions['0.1.5']).toBe('1.11.4');
+		expect(versions['0.1.6']).toBe('1.11.4');
 	});
 
 	it('esbuild banner names the notes-to-kindle repo', () => {

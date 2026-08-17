@@ -25,7 +25,11 @@ src/
     upload.ts                 Presigned upload URL validation (HTTPS, amazon.com/amazonaws.com only)
     user-agent.ts             Client identifier handling
   obsidian-extract/
-    extract.ts                Resolves embeds (up to depth 3), wikilinks, callouts → clean markdown
+    extract.ts                Resolves embeds and opt-in remote image references → clean markdown
+    image-assets.ts           Shared local/remote image validation, conversion, caching, budgets
+  images/
+    remote-fetch.ts           SSRF-hardened HTTPS transport with DNS pinning and bounded redirects
+    preflight.ts              Per-send remote download consent and final image confirmation
   epub/
     builder.ts                Markdown → EPUB (in-memory ArrayBuffer)
     render.ts                 Hardened Markdown → XHTML (escapes raw HTML, safe link schemes)
@@ -161,11 +165,13 @@ Follow Obsidian's **Developer Policies** and **Plugin Guidelines**. In particula
 
 - This is an **unofficial** Amazon integration. Never claim Amazon authorized, approved, or endorsed it, and never imply the disclaimer removes risk.
 - There is **no public Send to Kindle API**. The plugin uses undocumented/internal Amazon STK endpoints and protocol identifiers compatible with the official desktop client, and registers a **synthetic device**.
-- Per send, the following leaves the machine: note title, configured author, the full note content (including expanded embedded-note text up to depth 3), approved local JPEG/opaque PNG/static GIF image bytes, locally generated JPEG bytes converted from transparent PNG/static WebP, and the generated EPUB. Images included without conversion can retain EXIF, GPS, thumbnails, camera details, and color profiles; converted inputs do not intentionally copy source metadata. The plugin confirms image count and total size before sending.
+- Per send, the following leaves the machine: note title, configured author, the full note content (including expanded embedded-note text up to depth 3), approved local or remotely downloaded JPEG/opaque PNG/static GIF image bytes, locally generated JPEG bytes converted from transparent PNG/static WebP, and the generated EPUB. Images included without conversion can retain EXIF, GPS, thumbnails, camera details, and color profiles; converted inputs do not intentionally copy source metadata. The plugin confirms image count and total size before sending.
 - Destinations: `api.amazon.com` (OAuth token exchange), `firs-ta-g7g.amazon.com` (device registration), `stkservice.amazon.com` (delivery request), and a validated HTTPS presigned upload host on `amazon.com`/`amazonaws.com` (exact host or subdomain, no userinfo/IP literal/non-default port; see `src/stk/upload.ts`).
 - What stays local: no developer server, no telemetry/analytics; credentials in OS keychain (`app.secretStorage`); temp EPUB in a `0700` dir with `0600` file, cleaned after upload (`src/epub/temp.ts`).
 - **Disconnect** in settings only blanks local credentials. Server-side revocation requires the user to remove the synthetic device in Amazon **Content & Devices**. Document this; do not claim Disconnect revokes Amazon-side access.
-- Capabilities (keep accurate): embedded Markdown notes expand up to depth 3; validated vault-local JPEG, opaque PNG, and static GIF images are included; transparent PNG and static WebP are converted locally to JPEG after animation checks; all image sends require an explicit preflight; remote images remain disabled and are never fetched; SVG and other unsupported resources render as alt text or omission markers; raw HTML is escaped; only safe link schemes (`http:`, `https:`, `mailto:`) survive.
+- Remote image privacy: only Markdown image tokens are candidates; raw HTML and code are excluded. Before any request, the user must approve the discovered hosts for that send. The choice is not persisted. Requests use HTTPS without cookies, credentials, authorization, or referrer, but the remote host sees the user's IP address and requested path/query.
+- Remote image security: keep DNS answers pinned to isolated, non-pooled connections; reject the whole answer set if any A/AAAA address is private, local, special-purpose, or otherwise non-public; preserve the original hostname for TLS verification; disable automatic redirects, allow same-origin redirects only, and revalidate every hop; accept identity encoding only; enforce a 15-second deadline for the complete remote-image phase, 10 MiB response cap, 50 MiB aggregate budget, and 20-URL cap. Never replace this with a normal fetch after DNS preflight because that reintroduces DNS rebinding.
+- Capabilities (keep accurate): embedded Markdown notes expand up to depth 3; validated vault-local and approved HTTPS JPEG, opaque PNG, and static GIF images are included; vault-local transparent PNG and static WebP are converted locally to JPEG after animation checks; remote inputs that require browser conversion are omitted so the remote-phase deadline remains enforceable; remote downloads require per-send consent and all image sends require a final preflight; SVG and other unsupported resources render as alt text or omission markers; raw HTML is escaped; only safe link schemes (`http:`, `https:`, `mailto:`) survive.
 - Keep README.md, LICENSE, and THIRD_PARTY_NOTICES.md accurate. `THIRD_PARTY_NOTICES.md` carries required notices (stkclient MIT © 2022 Max Johnson, marked, fflate) and acknowledgements (stkclient-swift, obsidian-sample-plugin).
 
 ## UX & copy guidelines (for UI text, commands, settings)

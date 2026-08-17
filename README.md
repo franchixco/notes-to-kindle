@@ -8,13 +8,22 @@ Send your Obsidian notes to your Kindle as EPUB, straight from the Obsidian desk
 
 Notes to Kindle takes the current note, converts it to an EPUB, and delivers it to your Kindle over Wi-Fi as a personal document. It uses the note title and the default author configured in the plugin settings.
 
+## What's new in 0.1.6
+
+- Detects HTTPS images in Markdown inline and reference-style image tokens, including images inside expanded embedded notes. Raw HTML, code spans, and fenced code are never treated as image requests.
+- Asks before making any remote image request. Approval applies only to the current send and is never saved; choosing **Skip remote images** keeps the safe alt-text fallback.
+- Downloads at most 20 unique remote URLs through an SSRF-hardened transport: public IPs only, pinned DNS answers, isolated sockets, strict TLS hostname verification, same-origin redirects only, a 15-second deadline for the whole remote-image phase, and bounded identity-encoded responses.
+- Sends no cookies, Amazon credentials, or authorization headers to image hosts. Those hosts still receive your IP address and the requested URL, including any path or query string already present in the note.
+- Validates remote bytes through the same bounded image pipeline as local files. JPEG, opaque PNG, and static GIF are packaged directly. Remote transparent PNG and WebP are omitted because their browser conversion cannot be cancelled safely within the remote-phase deadline; failures degrade to alt text without aborting the send.
+- SVG remains disabled for the planned 0.1.7 work.
+
 ## What's new in 0.1.5
 
 - Converts vault-local **transparent PNG** and **static WebP** images to JPEG entirely inside Obsidian before building the EPUB.
 - Flattens transparency onto a white background and rejects APNG or animated WebP before browser decoding.
 - Hashes, deduplicates, budgets, and revalidates the converted JPEG bytes using the existing image security pipeline.
 - Converted PNG/WebP metadata is not intentionally copied; local images included without conversion may still retain EXIF, GPS, thumbnails, or color profiles.
-- Remote images remain disabled for the planned 0.1.6 work, and SVG remains disabled for the planned 0.1.7 work.
+- Remote images remain disabled in this release, and SVG remains disabled for the planned 0.1.7 work.
 
 ## What's new in 0.1.4
 
@@ -45,7 +54,7 @@ You stay in control. Authentication only happens when you click **Authenticate**
 
 - The note's title and the author name you configured.
 - The complete note content, including the expanded text of embedded notes up to a nesting depth of 3.
-- Approved local JPEG, opaque PNG, and static GIF image bytes referenced by those notes, plus JPEG output produced locally from transparent PNG and static WebP inputs. Images included without conversion can retain embedded metadata such as EXIF, camera details, thumbnails, ICC profiles, or GPS location; converted inputs do not intentionally copy source metadata. The plugin confirms the count and total size before sending them.
+- Approved local and remotely downloaded JPEG, opaque PNG, and static GIF image bytes referenced by those notes, plus JPEG output produced locally from transparent PNG and static WebP inputs. Images included without conversion can retain embedded metadata such as EXIF, camera details, thumbnails, ICC profiles, or GPS location; converted inputs do not intentionally copy source metadata. The plugin confirms the count and total size before sending them.
 - The generated EPUB built from that content.
 - The EPUB file size and the serial numbers of the selected destination devices.
 - Protocol metadata required by Amazon's internal service, including the synthetic device identifier, access/authentication tokens, and cryptographic request signatures. The RSA private key itself is not sent back to Amazon.
@@ -56,6 +65,7 @@ You stay in control. Authentication only happens when you click **Authenticate**
 - `firs-ta-g7g.amazon.com`: synthetic device registration.
 - `stkservice.amazon.com`: the send-to-Kindle delivery request.
 - A presigned HTTPS upload URL on an AWS S3 endpoint (`s3.amazonaws.com` or a supported regional, virtual-hosted, dual-stack, or legacy S3 form) or Amazon's exact CAPS upload host (`zme-caps.amazon.com`). Arbitrary Amazon/AWS subdomains, userinfo, IP literals, redirects, and non-default ports are rejected.
+- If you approve remote images for a send, each HTTPS image host shown in the confirmation receives a direct request from your machine. The host sees your IP address, the requested path/query, and the plugin user agent. The plugin sends no cookies, Amazon credentials, referrer, or authorization header. DNS answers are pinned to isolated connections, any private, local, special-purpose, or mixed public/private answer is rejected, and redirects to another origin are blocked.
 
 **What stays local:**
 
@@ -72,7 +82,8 @@ You stay in control. Authentication only happens when you click **Authenticate**
 - Flattens callouts and normalizes wikilinks.
 - Renders checkboxes, highlights (`==text==`), and safe links.
 - Includes vault-local JPEG, opaque PNG, and single-frame GIF images referenced with Obsidian embeds or Markdown image syntax. Transparent PNG and static WebP inputs are flattened onto white and converted locally to JPEG. Images are resolved relative to the note that contains them, validated, deduplicated, and confirmed before sending.
-- **Not included:** remote images, APNG, animated WebP/GIF, SVG, BMP, TIFF, HEIC, AVIF, raw HTML images, CSS backgrounds, Canvas/PDF pages, or plugin-rendered diagrams. Remote images are never downloaded; unsupported resources degrade to alt text or an omission marker.
+- With per-send approval, includes HTTPS JPEG, opaque PNG, and static GIF resources referenced by Markdown inline or reference-style image tokens. Remote resources share the local image limits: 10 MiB per response, 50 MiB total, 100 unique packaged assets, and 20 unique remote URLs.
+- **Not included:** HTTP or non-public remote resources, remote transparent PNG or WebP, APNG, animated WebP/GIF, SVG, BMP, TIFF, HEIC, AVIF, raw HTML images, CSS backgrounds, Canvas/PDF pages, or plugin-rendered diagrams. Unsupported resources degrade to alt text or an omission marker.
 - **Escaping:** raw HTML is escaped rather than executed. Links only keep safe schemes (`http:`, `https:`, `mailto:`); everything else is neutralized.
 
 ## Requirements
@@ -130,7 +141,8 @@ Releases before 0.1.2 shipped under the plugin id and install folder `send-to-ki
 | `src/images/validate.ts` | Bounded JPEG, PNG, and GIF structural validation |
 | `src/images/webp.ts` | Bounded static WebP container inspection |
 | `src/images/convert.ts` | Local Chromium raster conversion to opaque JPEG |
-| `src/images/preflight.ts` | Local-image privacy confirmation |
+| `src/images/remote-fetch.ts` | Consent-gated, SSRF-hardened HTTPS image transport |
+| `src/images/preflight.ts` | Remote-download consent and final image-send confirmation |
 | `src/epub/builder.ts` | EPUB generation |
 | `src/epub/render.ts` | Hardened Markdown rendering |
 | `src/epub/temp.ts` | Secure temp file handling |

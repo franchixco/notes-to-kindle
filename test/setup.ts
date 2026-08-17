@@ -7,6 +7,8 @@ const nodeRequire = createRequire(import.meta.url);
 
 const windowWithRequire = {
 	require: (id: string): unknown => nodeRequire(id) as unknown,
+	setTimeout,
+	clearTimeout,
 };
 
 (globalThis as unknown as { window?: unknown }).window = windowWithRequire;

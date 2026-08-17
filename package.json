@@ -1,6 +1,6 @@
 {
 	"name": "notes-to-kindle",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"description": "Convert notes to EPUB locally and send them to Amazon Kindle using an unofficial desktop integration.",
 	"main": "main.js",
 	"repository": "https://github.com/franchixco/notes-to-kindle",

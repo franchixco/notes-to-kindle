@@ -101,6 +101,11 @@ describe('validateImage', () => {
 			.toMatchObject({ ok: false, code: 'transparent-image' });
 	});
 
+	it('rejects APNG before transparent PNG conversion can run', () => {
+		expect(validateImage(png(2, 3, 6, [pngChunk('acTL', [...u32(2), ...u32(0)])]), 'png'))
+			.toMatchObject({ ok: false, code: 'animated-png' });
+	});
+
 	it('rejects animated and transparent GIF images', () => {
 		expect(validateImage(gif(2), 'gif')).toMatchObject({ ok: false, code: 'animated-gif' });
 		expect(validateImage(gif(1, true), 'gif')).toMatchObject({ ok: false, code: 'transparent-image' });

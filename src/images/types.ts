@@ -1,6 +1,7 @@
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_TOTAL_IMAGE_BYTES = 50 * 1024 * 1024;
 export const MAX_UNIQUE_IMAGES = 100;
+export const MAX_IMAGE_CONVERSIONS = 100;
 export const MAX_IMAGE_PIXELS = 40_000_000;
 export const MAX_EPUB_BYTES = 60 * 1024 * 1024;
 export const MAX_EMBED_REFERENCES = 2_000;
@@ -18,6 +19,7 @@ export interface EpubImageAsset {
 	sourcePath: string;
 	width: number;
 	height: number;
+	convertedFrom?: 'image/png' | 'image/webp';
 }
 
 export type ImageWarningCode =
@@ -26,6 +28,10 @@ export type ImageWarningCode =
 	| 'invalid-image-binary'
 	| 'transparent-image'
 	| 'animated-gif'
+	| 'animated-webp'
+	| 'animated-png'
+	| 'image-conversion-unavailable'
+	| 'image-conversion-failed'
 	| 'image-too-large'
 	| 'image-budget-exceeded'
 	| 'image-read-failed';
@@ -53,6 +59,7 @@ export type ImageValidationResult =
 			| 'invalid-image-binary'
 			| 'transparent-image'
 			| 'animated-gif'
+			| 'animated-png'
 			| 'image-too-large'>;
 		reason: string;
 	};

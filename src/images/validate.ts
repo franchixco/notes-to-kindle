@@ -115,6 +115,8 @@ function parsePng(data: Uint8Array): ImageValidationResult {
 			sawEnd = true;
 			offset = data.length;
 			break;
+		} else if (type === 'acTL') {
+			return { ok: false, code: 'animated-png', reason: 'Animated PNG images are not supported.' };
 		} else if (/^[A-Z]/.test(type)) return invalid(`Unknown critical PNG chunk ${type}.`);
 
 		offset = payloadEnd + 4;

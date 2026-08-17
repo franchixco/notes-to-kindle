@@ -26,6 +26,7 @@ You stay in control. Authentication only happens when you click **Authenticate**
 
 - The note's title and the author name you configured.
 - The complete note content, including the expanded text of embedded notes up to a nesting depth of 3.
+- Approved local JPEG, opaque PNG, and static GIF image bytes referenced by those notes. Original bytes can retain embedded metadata such as EXIF, camera details, thumbnails, ICC profiles, or GPS location; the plugin confirms the count and total size before sending them.
 - The generated EPUB built from that content.
 - The EPUB file size and the serial numbers of the selected destination devices.
 - Protocol metadata required by Amazon's internal service, including the synthetic device identifier, access/authentication tokens, and cryptographic request signatures. The RSA private key itself is not sent back to Amazon.
@@ -35,7 +36,7 @@ You stay in control. Authentication only happens when you click **Authenticate**
 - `api.amazon.com`: OAuth token exchange.
 - `firs-ta-g7g.amazon.com`: synthetic device registration.
 - `stkservice.amazon.com`: the send-to-Kindle delivery request.
-- A presigned HTTPS upload URL on an AWS S3 endpoint (`s3.amazonaws.com` or a supported regional, virtual-hosted, dual-stack, or legacy S3 form). Arbitrary Amazon/AWS subdomains, userinfo, IP literals, redirects, and non-default ports are rejected.
+- A presigned HTTPS upload URL on an AWS S3 endpoint (`s3.amazonaws.com` or a supported regional, virtual-hosted, dual-stack, or legacy S3 form) or Amazon's exact CAPS upload host (`zme-caps.amazon.com`). Arbitrary Amazon/AWS subdomains, userinfo, IP literals, redirects, and non-default ports are rejected.
 
 **What stays local:**
 
@@ -51,7 +52,8 @@ You stay in control. Authentication only happens when you click **Authenticate**
 - Expands embedded notes (`![[other note]]`) up to a nesting depth of 3.
 - Flattens callouts and normalizes wikilinks.
 - Renders checkboxes, highlights (`==text==`), and safe links.
-- **Not included:** embedded images and remote images. They render as their alt text, not as pictures.
+- Includes vault-local JPEG, opaque PNG, and single-frame GIF images referenced with Obsidian embeds or Markdown image syntax. Images are resolved relative to the note that contains them, validated, deduplicated, and confirmed before sending.
+- **Not included:** remote images, transparent images, animated GIFs, SVG, WebP, BMP, TIFF, HEIC, AVIF, raw HTML images, CSS backgrounds, Canvas/PDF pages, or plugin-rendered diagrams. They are never downloaded and degrade to alt text or an omission marker.
 - **Escaping:** raw HTML is escaped rather than executed. Links only keep safe schemes (`http:`, `https:`, `mailto:`); everything else is neutralized.
 
 ## Requirements
@@ -106,6 +108,8 @@ Releases before 0.1.2 shipped under the plugin id and install folder `send-to-ki
 | `src/stk/presign-upload.ts` | Bounded, timeout-aware presigned upload transport |
 | `src/stk/user-agent.ts` | Client identifier handling |
 | `src/obsidian-extract/extract.ts` | Markdown preprocessing for Kindle |
+| `src/images/validate.ts` | Bounded JPEG, PNG, and GIF structural validation |
+| `src/images/preflight.ts` | Local-image privacy confirmation |
 | `src/epub/builder.ts` | EPUB generation |
 | `src/epub/render.ts` | Hardened Markdown rendering |
 | `src/epub/temp.ts` | Secure temp file handling |

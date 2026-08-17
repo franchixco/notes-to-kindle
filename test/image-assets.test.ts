@@ -145,6 +145,29 @@ describe('ImageAssetRegistry', () => {
 		expect(calls).toEqual(['image/png', 'image/webp']);
 	});
 
+	it('rejects remote inputs that would require non-cancelable browser conversion', async () => {
+		let calls = 0;
+		const converter: RasterToJpeg = { convert: async () => { calls += 1; return jpeg(0x46); } };
+		const registry = new ImageAssetRegistry(undefined, converter);
+		const pngResult = await registry.registerRemote(
+			transparentPng(),
+			'image/png',
+			'root.md',
+			'https://cdn.example/alpha.png',
+			'https://cdn.example/alpha.png',
+		);
+		const webpResult = await registry.registerRemote(
+			staticWebP(),
+			'image/webp',
+			'root.md',
+			'https://cdn.example/static.webp',
+			'https://cdn.example/static.webp',
+		);
+		expect(pngResult).toMatchObject({ ok: false, warning: { code: 'unsupported-image-format' } });
+		expect(webpResult).toMatchObject({ ok: false, warning: { code: 'unsupported-image-format' } });
+		expect(calls).toBe(0);
+	});
+
 	it('rejects APNG and animated WebP without calling the converter', async () => {
 		const binaries = new Map([
 			['animated.png', transparentPng(true)],

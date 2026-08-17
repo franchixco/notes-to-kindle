@@ -20,6 +20,11 @@ export interface EpubImageAsset {
 	width: number;
 	height: number;
 	convertedFrom?: 'image/png' | 'image/webp';
+	remoteSourceUrl?: string;
+}
+
+export interface RemoteImageReference {
+	href: string;
 }
 
 export type ImageWarningCode =
@@ -34,7 +39,8 @@ export type ImageWarningCode =
 	| 'image-conversion-failed'
 	| 'image-too-large'
 	| 'image-budget-exceeded'
-	| 'image-read-failed';
+	| 'image-read-failed'
+	| 'remote-image-failed';
 
 export interface ImageWarning {
 	code: ImageWarningCode;

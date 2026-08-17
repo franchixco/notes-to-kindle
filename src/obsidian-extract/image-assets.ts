@@ -16,6 +16,7 @@ import {
 } from '../images/types';
 import { validateImage } from '../images/validate';
 import { inspectStaticWebP } from '../images/webp';
+import type { RemoteImageMediaType } from '../images/remote-fetch';
 
 type RegisterResult = { ok: true; asset: EpubImageAsset } | { ok: false; warning: ImageWarning };
 type CachedResult = { ok: true; asset: EpubImageAsset } | {
@@ -71,7 +72,8 @@ export class ImageAssetRegistry {
 	}
 
 	async register(app: App, file: TFile, sourcePath: string, target: string): Promise<RegisterResult> {
-		const cached = this.byPath.get(file.path);
+		const cacheKey = `local:${file.path}`;
+		const cached = this.byPath.get(cacheKey);
 		if (cached) {
 			return cached.ok ? cached : warning(cached.code, sourcePath, target, cached.message);
 		}
@@ -82,12 +84,12 @@ export class ImageAssetRegistry {
 				code: 'unsupported-image-format',
 				message: 'Only supported local raster image formats can be included.',
 			};
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 		if (file.stat.size > this.limits.maxImageBytes) {
 			const result: CachedResult = { ok: false, code: 'image-too-large', message: 'Image exceeds the 10 MiB limit.' };
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 		if (this.byHash.size >= this.limits.maxUniqueImages
@@ -101,12 +103,59 @@ export class ImageAssetRegistry {
 			data = new Uint8Array(await app.vault.readBinary(file));
 		} catch {
 			const result: CachedResult = { ok: false, code: 'image-read-failed', message: 'A local image could not be read.' };
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 		if (data.byteLength > this.limits.maxImageBytes) {
 			const result: CachedResult = { ok: false, code: 'image-too-large', message: 'Image exceeds the 10 MiB limit.' };
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
+			return warning(result.code, sourcePath, target, result.message);
+		}
+		return this.registerData(cacheKey, extension, data, sourcePath, target, file.path);
+	}
+
+	async registerRemote(
+		data: Uint8Array,
+		mediaType: RemoteImageMediaType,
+		sourcePath: string,
+		target: string,
+		finalUrl: string,
+	): Promise<RegisterResult> {
+		const extension: Record<RemoteImageMediaType, string> = {
+			'image/jpeg': 'jpg',
+			'image/png': 'png',
+			'image/gif': 'gif',
+			'image/webp': 'webp',
+		};
+		return this.registerData(`remote:${target}`, extension[mediaType], data, sourcePath, target, finalUrl, finalUrl);
+	}
+
+	private async registerData(
+		cacheKey: string,
+		extension: string,
+		data: Uint8Array,
+		sourcePath: string,
+		target: string,
+		assetSourcePath: string,
+		remoteSourceUrl?: string,
+	): Promise<RegisterResult> {
+		const cached = this.byPath.get(cacheKey);
+		if (cached) return cached.ok ? cached : warning(cached.code, sourcePath, target, cached.message);
+		if (data.byteLength > this.limits.maxImageBytes) {
+			const result: CachedResult = { ok: false, code: 'image-too-large', message: 'Image exceeds the 10 MiB limit.' };
+			this.byPath.set(cacheKey, result);
+			return warning(result.code, sourcePath, target, result.message);
+		}
+		if (this.byHash.size >= this.limits.maxUniqueImages
+			|| this.totalBytes >= this.limits.maxTotalBytes
+			|| (!['png', 'webp'].includes(extension)
+				&& data.byteLength > this.limits.maxTotalBytes - this.totalBytes)) {
+			const result: CachedResult = {
+				ok: false,
+				code: 'image-budget-exceeded',
+				message: 'The note exceeds the image budget.',
+			};
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 
@@ -116,18 +165,27 @@ export class ImageAssetRegistry {
 		const nodeCrypto = window.require('crypto') as typeof crypto;
 		let validation = extension === 'webp'
 			? null
-			: validateImage(finalData, file.extension);
+			: validateImage(finalData, extension);
 
 		if (extension === 'webp') {
 			const inspection = inspectStaticWebP(data);
 			if (!inspection.ok) {
 				const result: CachedResult = { ok: false, code: inspection.code, message: inspection.reason };
-				this.byPath.set(file.path, result);
+				this.byPath.set(cacheKey, result);
 				return warning(result.code, sourcePath, target, result.message);
 			}
 			convertedFrom = 'image/webp';
 		} else if (extension === 'png' && validation && !validation.ok && validation.code === 'transparent-image') {
 			convertedFrom = 'image/png';
+		}
+		if (convertedFrom && remoteSourceUrl) {
+			const result: CachedResult = {
+				ok: false,
+				code: 'unsupported-image-format',
+				message: 'Remote images that require browser conversion are not supported.',
+			};
+			this.byPath.set(cacheKey, result);
+			return warning(result.code, sourcePath, target, result.message);
 		}
 
 		if (convertedFrom) {
@@ -136,7 +194,7 @@ export class ImageAssetRegistry {
 			conversionSourceKey = sourceKey;
 			const sourceCached = this.byConvertibleSource.get(sourceKey);
 			if (sourceCached) {
-				this.byPath.set(file.path, sourceCached);
+				this.byPath.set(cacheKey, sourceCached);
 				return sourceCached.ok
 					? sourceCached
 					: warning(sourceCached.code, sourcePath, target, sourceCached.message);
@@ -144,7 +202,7 @@ export class ImageAssetRegistry {
 			if (this.conversionAttempts >= this.limits.maxConversions) {
 				const result: CachedResult = { ok: false, code: 'image-budget-exceeded', message: 'The note exceeds the image conversion limit.' };
 				this.byConvertibleSource.set(sourceKey, result);
-				this.byPath.set(file.path, result);
+				this.byPath.set(cacheKey, result);
 				return warning(result.code, sourcePath, target, result.message);
 			}
 			this.conversionAttempts += 1;
@@ -158,32 +216,32 @@ export class ImageAssetRegistry {
 					message: unavailable ? 'Local image conversion is unavailable.' : 'Local image conversion failed.',
 				};
 				this.byConvertibleSource.set(sourceKey, result);
-				this.byPath.set(file.path, result);
+				this.byPath.set(cacheKey, result);
 				return warning(result.code, sourcePath, target, result.message);
 			}
 			if (finalData.byteLength > this.limits.maxImageBytes) {
 				const result: CachedResult = { ok: false, code: 'image-too-large', message: 'Converted image exceeds the 10 MiB limit.' };
 				this.byConvertibleSource.set(sourceKey, result);
-				this.byPath.set(file.path, result);
+				this.byPath.set(cacheKey, result);
 				return warning(result.code, sourcePath, target, result.message);
 			}
 			validation = validateImage(finalData, 'jpg');
 			if (!validation.ok) {
 				const result: CachedResult = { ok: false, code: validation.code, message: validation.reason };
 				this.byConvertibleSource.set(sourceKey, result);
-				this.byPath.set(file.path, result);
+				this.byPath.set(cacheKey, result);
 				return warning(result.code, sourcePath, target, result.message);
 			}
 		}
 
 		if (validation === null) {
 			const result: CachedResult = { ok: false, code: 'invalid-image-binary', message: 'Image conversion did not produce a valid JPEG.' };
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 		if (!validation.ok) {
 			const result: CachedResult = { ok: false, code: validation.code, message: validation.reason };
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 
@@ -195,14 +253,14 @@ export class ImageAssetRegistry {
 			}
 			const result: CachedResult = { ok: true, asset: existing };
 			if (conversionSourceKey) this.byConvertibleSource.set(conversionSourceKey, result);
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return result;
 		}
 		if (this.byHash.size >= this.limits.maxUniqueImages
 			|| finalData.byteLength > this.limits.maxTotalBytes - this.totalBytes) {
 			const result: CachedResult = { ok: false, code: 'image-budget-exceeded', message: 'The note exceeds the image budget.' };
 			if (conversionSourceKey) this.byConvertibleSource.set(conversionSourceKey, result);
-			this.byPath.set(file.path, result);
+			this.byPath.set(cacheKey, result);
 			return warning(result.code, sourcePath, target, result.message);
 		}
 		const image = validation.image;
@@ -211,14 +269,15 @@ export class ImageAssetRegistry {
 			href: `images/${hash}.${image.extension}`,
 			mediaType: image.mediaType,
 			data: finalData,
-			sourcePath: file.path,
+			sourcePath: assetSourcePath,
 			width: image.width,
 			height: image.height,
 			convertedFrom,
+			remoteSourceUrl,
 		};
 		this.byHash.set(hash, asset);
 		const result: CachedResult = { ok: true, asset };
-		this.byPath.set(file.path, result);
+		this.byPath.set(cacheKey, result);
 		if (conversionSourceKey) this.byConvertibleSource.set(conversionSourceKey, result);
 		this.totalBytes += finalData.byteLength;
 		return result;
@@ -234,5 +293,9 @@ export class ImageAssetRegistry {
 
 	warnings(): ImageWarning[] {
 		return [...this.collectedWarnings];
+	}
+
+	remainingTotalBytes(): number {
+		return Math.max(0, this.limits.maxTotalBytes - this.totalBytes);
 	}
 }

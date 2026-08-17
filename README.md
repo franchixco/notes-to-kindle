@@ -8,6 +8,17 @@ Send your Obsidian notes to your Kindle as EPUB, straight from the Obsidian desk
 
 Notes to Kindle takes the current note, converts it to an EPUB, and delivers it to your Kindle over Wi-Fi as a personal document. It uses the note title and the default author configured in the plugin settings.
 
+## What's new in 0.1.4
+
+- Includes validated vault-local **JPEG**, **opaque PNG**, and **static GIF** images in the EPUB.
+- Resolves images relative to both the current note and embedded notes, with SHA-256 deduplication and bounded resource limits.
+- Shows a privacy preflight with image count and total size before original bytes — which may retain EXIF or GPS metadata — are sent to Amazon.
+- Keeps SVG, WebP, transparent images, animated GIFs, and remote images out of the EPUB; they degrade to visible omission markers or safe alt text and remote images are never downloaded.
+- Supports Amazon's exact current CAPS upload endpoint (`zme-caps.amazon.com`) without broadening trust to arbitrary `amazon.com` hosts.
+- Verified with 201 automated tests, EPUBCheck 5.3.0, and end-to-end delivery on a physical Kindle.
+
+See the [Notes to Kindle 0.1.4 release](https://github.com/franchixco/notes-to-kindle/releases/tag/0.1.4) for downloadable artifacts and release notes.
+
 ## Important: how the send works
 
 There is **no public Send to Kindle API**. This plugin talks to Amazon's undocumented, internal Send to Kindle endpoints and reuses protocol and client identifiers associated with Amazon's official desktop client. It registers a synthetic device in your Amazon account so documents can be delivered to it.

@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, KindleStkSettings, KindleStkSettingTab } from './sett
 import { extractNote } from './obsidian-extract/extract';
 import { buildEpub } from './epub/builder';
 import { createTempEpubFile } from './epub/temp';
+import { closeActiveImagePreflights, confirmImageSend } from './images/preflight';
 import { generatePkce } from './stk/oauth';
 import { OperationTracker } from './lifecycle';
 import {
@@ -119,6 +120,7 @@ export default class KindleStkPlugin extends Plugin {
 	private auth = new OperationTracker();
 	private authTimeoutId: number | null = null;
 	private cancelActiveAuth: (() => void) | null = null;
+	private sendInProgress = false;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -146,6 +148,7 @@ export default class KindleStkPlugin extends Plugin {
 
 	onunload(): void {
 		this.cancelOAuth();
+		closeActiveImagePreflights();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -449,6 +452,19 @@ export default class KindleStkPlugin extends Plugin {
 	}
 
 	private async sendToKindle(file: TFile): Promise<void> {
+		if (this.sendInProgress) {
+			new Notice('A note is already being prepared or sent.');
+			return;
+		}
+		this.sendInProgress = true;
+		try {
+			await this.sendToKindleOnce(file);
+		} finally {
+			this.sendInProgress = false;
+		}
+	}
+
+	private async sendToKindleOnce(file: TFile): Promise<void> {
 		const creds = this.getCredentials();
 		if (!creds) {
 			new Notice('Not authenticated. Run "authenticate with Amazon" first.');
@@ -472,6 +488,15 @@ export default class KindleStkPlugin extends Plugin {
 		try {
 			new Notice('Preparing note...');
 			const note = await extractNote(this.app, file);
+			const imageWarnings = note.warnings ?? [];
+			const imageAssets = note.assets ?? [];
+			if (imageWarnings.length > 0) {
+				new Notice(`${imageWarnings.length} local image${imageWarnings.length === 1 ? ' was' : 's were'} omitted from the EPUB.`);
+			}
+			if (!await confirmImageSend(this.app, imageAssets)) {
+				new Notice('Send cancelled.');
+				return;
+			}
 			const epub = await buildEpub(note, {
 				title: note.title,
 				author: this.settings.defaultAuthor,

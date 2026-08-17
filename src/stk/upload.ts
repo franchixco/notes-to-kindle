@@ -1,11 +1,10 @@
 /**
  * Validation for the presigned upload URL returned by `/GetUploadUrl`.
  *
- * The URL comes from Amazon's API but is signed S3 data, so it is still
- * treated as untrusted input: only HTTPS, only exact AWS S3 endpoint host
- * shapes, no userinfo, no non-default port, no IP literals, no
- * protocol-relative URLs. The query string (signature parameters) is
- * preserved.
+ * The URL comes from Amazon's API but is still treated as untrusted input:
+ * only HTTPS, only exact AWS S3 endpoint host shapes or Amazon's exact CAPS
+ * upload host, no userinfo, no non-default port, no IP literals, no
+ * protocol-relative URLs. The query string (signature parameters) is preserved.
  */
 
 // Exact S3 endpoint host forms (lowercased, full-string match):
@@ -26,15 +25,20 @@ const S3_HOST_PATTERNS = [
 	/^[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?\.s3-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.amazonaws\.com$/,
 ];
 
+// Current STK responses can use Amazon's Content Acquisition and Processing
+// Service instead of S3 directly. Keep this exact: no amazon.com wildcard and
+// no certificate alias is trusted unless GetUploadUrl starts returning it.
+const CAPS_UPLOAD_HOST = 'zme-caps.amazon.com';
+
 const IPV4_LITERAL_RE = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 function isIpLiteral(hostname: string): boolean {
 	return IPV4_LITERAL_RE.test(hostname) || hostname.startsWith('[');
 }
 
-function isS3EndpointHost(hostname: string): boolean {
+function isAllowedUploadHost(hostname: string): boolean {
 	const host = hostname.toLowerCase();
-	return S3_HOST_PATTERNS.some((pattern) => pattern.test(host));
+	return host === CAPS_UPLOAD_HOST || S3_HOST_PATTERNS.some((pattern) => pattern.test(host));
 }
 
 export function validateUploadUrl(rawUrl: string): URL {
@@ -65,8 +69,8 @@ export function validateUploadUrl(rawUrl: string): URL {
 	if (isIpLiteral(url.hostname)) {
 		throw new Error('Upload URL must use a hostname, not an IP address');
 	}
-	if (!isS3EndpointHost(url.hostname)) {
-		throw new Error(`Upload URL host "${url.hostname}" is not an allowed S3 endpoint`);
+	if (!isAllowedUploadHost(url.hostname)) {
+		throw new Error(`Upload URL host "${url.hostname}" is not an allowed upload endpoint`);
 	}
 
 	return url;

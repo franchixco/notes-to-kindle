@@ -17,6 +17,15 @@ describe('validateUploadUrl', () => {
 		}
 	});
 
+	it('accepts the exact Amazon CAPS upload host and preserves its opaque URL', () => {
+		const url = validateUploadUrl(
+			'https://zme-caps.amazon.com/opaque/upload/path?token=temporary&expires=123',
+		);
+		expect(url.hostname).toBe('zme-caps.amazon.com');
+		expect(url.pathname).toBe('/opaque/upload/path');
+		expect(url.search).toBe('?token=temporary&expires=123');
+	});
+
 	it('rejects bare Amazon roots and non-S3 Amazon subdomains', () => {
 		for (const url of [
 			'https://amazon.com/x.epub',
@@ -26,9 +35,10 @@ describe('validateUploadUrl', () => {
 			'https://firs-ta-g7g.amazon.com/x',
 			'https://deep.sub.amazonaws.com/x',
 			'https://upload.amazon.com/x',
+			'https://zme-caps-us-east-1.amazon.com/x',
 			'https://s3.foo.bar.amazonaws.com/x',
 		]) {
-			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed S3 endpoint/);
+			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed upload endpoint/);
 		}
 	});
 
@@ -47,8 +57,11 @@ describe('validateUploadUrl', () => {
 			'https://bucket.storage.example.com/x',
 			'https://s3.notamazon.com/x',
 			'https://my-bucket.s3.dualstack.evil.io/x',
+			'https://evil.zme-caps.amazon.com/x',
+			'https://zme-caps.amazon.com.evil.test/x',
+			'https://zme-caps-amazon.com/x',
 		]) {
-			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed S3 endpoint/);
+			expect(() => validateUploadUrl(url), url).toThrow(/not an allowed upload endpoint/);
 		}
 	});
 
@@ -83,6 +96,7 @@ describe('validateUploadUrl', () => {
 			'https://s3.amazonaws.com:8443/x',
 			'https://bucket.s3.amazonaws.com:8080/x',
 			'https://amazon.com:8080/x',
+			'https://zme-caps.amazon.com:8443/x',
 		]) {
 			expect(() => validateUploadUrl(url), url).toThrow(/non-default port/);
 		}
